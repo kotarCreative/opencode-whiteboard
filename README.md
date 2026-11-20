@@ -83,9 +83,10 @@ Open any project and use it:
   tool, is removed), and the embedded `whiteboard` skill teaches pull-only
   usage.
 
-No repository clone, `npm ci`, `npm run build:gui`, separate MCP entry, or
-hand-edited global JSON is required. The package ships its prebuilt GUI bundle
-(`dist/gui-experimental.cjs`) and auto-registers the MCP server.
+No manual clone into your workspace, `npm ci`, `npm run build:gui`, separate
+MCP entry, or hand-edited global JSON is required. The package ships its
+prebuilt GUI bundle (`dist/gui-experimental.cjs`) and auto-registers the MCP
+server.
 
 > **Desktop status:** the panel is implemented against the documented
 > experimental GUI plugin API and tested with mocked Electron/host modules. A
