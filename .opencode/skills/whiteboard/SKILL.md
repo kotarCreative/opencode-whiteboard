@@ -1,15 +1,18 @@
 ---
 name: Whiteboard
-description: Pull, inspect, and edit the single local Excalidraw whiteboard bound to this project. Use for whiteboard, canvas, diagram, Excalidraw, architecture drawing, or "pull the board" requests.
+description: Pull, inspect, and edit the one local Excalidraw whiteboard shared by OpenCode projects using this plugin. Use for whiteboard, canvas, diagram, Excalidraw, architecture drawing, or "pull the board" requests.
 ---
 
-# Project whiteboard
+# Local whiteboard
 
-This project has one local board, bound explicitly to
-`http://127.0.0.1:4317` and durable state in `.whiteboard/data`.
+There is one shared local board at `http://127.0.0.1:4317`. Its durable state
+lives in the user-level OpenCode Whiteboard data root, outside this project and
+outside the plugin cache. The board is shared by every OpenCode project that
+loads this plugin.
 
-Run `node bin/whiteboard.mjs info` if you need the exact board id, paths, and
-upstream version. Do not guess a different port or board.
+In a checkout, `node bin/whiteboard.mjs info` reports the exact board id, data
+paths, and upstream version. In an installed package, use the MCP tools below.
+Do not guess a different port or board.
 
 ## Pull, do not send
 
@@ -20,26 +23,24 @@ upstream version. Do not guess a different port or board.
 2. Call `whiteboard_get_canvas_screenshot` when visual layout matters.
 3. Summarize only what the user asked for.
 
-Never call `whiteboard_export_to_excalidraw_url`. It is denied by project
-permission and would upload the scene to excalidraw.com. Do not use any share or
-upload path. Do not send board contents to remote services.
+The upload tool is removed from the exposed tool surface. Never add or use a
+share/upload path, and do not send board contents to remote services.
 
 ## Editing
 
 - Call `whiteboard_read_diagram_guide` before drawing a new diagram.
 - Prefer `whiteboard_batch_create_elements` with stable ids for shapes, then bind
   arrows with `startElementId` / `endElementId`.
-- Export repo artifacts with `whiteboard_export_scene` to `boards/<name>.excalidraw`
-  only when the user asks.
+- Export artifacts with `whiteboard_export_scene` only when the user asks, using
+  the path they requested (or a clearly named path in the workspace).
 - After meaningful edits, pull again with `whiteboard_describe_scene` and, if
   layout matters, `whiteboard_get_canvas_screenshot`.
 
 ## Binding and freshness
 
-- One board per project. The canvas is started on demand by the Desktop panel
-  command or by the MCP server. If a tool call fails because the canvas is
-  unreachable, retry once, then run `node bin/whiteboard.mjs start` and report
-  the error. Do not start a second server on another port.
+- One shared board, not one per project. A tool call cold-starts the canvas if
+  needed. If it fails, retry once, then report the error. Do not start a second
+  server on another port.
 - MCP sees the canvas server state, not a browser tab's unsaved keystrokes.
   Pull again after the user says they edited in the browser.
 - The board is loopback-only. Do not expose the port or add a tunnel.

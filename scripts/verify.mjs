@@ -13,7 +13,9 @@ import Module, { createRequire } from "node:module"
 import { createServer } from "node:http"
 import { createInterface } from "node:readline"
 import { dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript"
+import { defaultDataRoot, loadBoardConfig } from "../bin/lib/backend.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const port = 4318
@@ -188,25 +190,43 @@ async function run() {
   }
   ok("upstream package checked", "no preinstall/postinstall hook")
 
+  if (pkg.version !== "0.2.0") fail("package version", pkg.version)
+  if (pkg.exports?.["./gui-experimental"] !== "./dist/gui-experimental.cjs") {
+    fail("package exports", JSON.stringify(pkg.exports))
+  }
+  if (!pkg.files?.includes("dist")) fail("package files", "dist is not shipped")
+  if (existsSync(join(root, ".git"))) {
+    const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "dist/gui-experimental.cjs"], {
+      cwd: root,
+      encoding: "utf8",
+    })
+    if (tracked.status !== 0) fail("GUI bundle tracked", "dist/gui-experimental.cjs is not tracked in Git")
+  }
+  ok("package shape", `${pkg.name}@${pkg.version}, GUI bundle exported and tracked`)
+
   const config = await readFile(join(root, "opencode.jsonc"), "utf8")
   const boardConfig = JSON.parse(await readFile(join(root, "whiteboard.config.json"), "utf8"))
   if (boardConfig.url !== "http://127.0.0.1:4317" || boardConfig.name !== "default") {
     fail("fixed single-board binding", "whiteboard.config.json is not the default loopback board")
+  }
+  if (boardConfig.storage !== "user") {
+    fail("shared board storage", "whiteboard.config.json must keep the one shared board outside the package cache")
   }
   if (!config.includes("whiteboard_export_to_excalidraw_url") || !config.includes('"effect": "deny"')) {
     fail("share/upload tool denied", "opencode.jsonc is missing the deny rule")
   }
   if (!config.includes("http://127.0.0.1:4317")) fail("fixed single-board binding", "board URL missing")
   const opencode = JSON.parse(config)
-  const mcpEnv = opencode.mcp?.servers?.whiteboard?.environment ?? {}
-  if (mcpEnv.EXPRESS_SERVER_URL !== boardConfig.url) {
-    fail("MCP uses the same board URL", `MCP has ${mcpEnv.EXPRESS_SERVER_URL}, config has ${boardConfig.url}`)
+  if (opencode.mcp?.servers?.whiteboard) {
+    fail("MCP auto-registration", "opencode.jsonc still hand-declares the whiteboard MCP server")
   }
-  if (resolve(root, mcpEnv.EXCALIDRAW_DATA_DIR ?? "") !== resolve(root, boardConfig.dataDir)) {
-    fail(
-      "MCP uses the same durable store",
-      `MCP has ${mcpEnv.EXCALIDRAW_DATA_DIR}, config has ${boardConfig.dataDir}`,
-    )
+  const expectedDataRoot = defaultDataRoot(process.env)
+  const defaultBoard = loadBoardConfig({ root, env: process.env })
+  if (defaultBoard.storage !== "user" || defaultBoard.dataRoot !== expectedDataRoot) {
+    fail("shared board storage", `${defaultBoard.storage} ${defaultBoard.dataRoot} (expected user ${expectedDataRoot})`)
+  }
+  if (defaultBoard.dataDir.startsWith(join(root, "node_modules"))) {
+    fail("shared board storage", "durable data resolved inside node_modules")
   }
   ok("privacy/binding config", "fixed loopback URL; export_to_excalidraw_url denied")
 
@@ -214,7 +234,98 @@ async function run() {
   for (const api of ["layout.open(panelKey", "layout.toggle(panelKey", "slash: { name: \"whiteboard\" }", "main.ensure()"]) {
     if (!guiSource.includes(api)) fail("panel lifecycle commands", `missing ${api}`)
   }
-  ok("MCP and backend share one durable store", `${boardConfig.url} → ${boardConfig.dataDir}`)
+
+  // Exercise the real server part with mocked registries. This proves the
+  // one-reference install auto-registers MCP from the package's own dependency
+  // tree, shares the backend's user-level store, removes the upload tool, and
+  // contributes the skill without a project-local config edit. Transpile in
+  // memory so the check also runs on Node 20, which cannot import .ts directly.
+  const source = await readFile(join(root, "src", "index.ts"), "utf8")
+  const transpiled = transpileModule(source, {
+    compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022, verbatimModuleSyntax: false },
+  }).outputText
+  const transpiledPath = join(root, "src", `.verify-index-${process.pid}.mjs`)
+  await writeFile(transpiledPath, transpiled)
+  let serverPlugin
+  try {
+    serverPlugin = (await import(pathToFileURL(transpiledPath).href)).default
+  } finally {
+    await rm(transpiledPath, { force: true })
+  }
+  if (serverPlugin.id !== "opencode-whiteboard" || typeof serverPlugin.setup !== "function") {
+    fail("server plugin exports", "missing id/setup")
+  }
+  const registered = { mcp: null, removed: [], skill: null }
+  const serverCtx = {
+    location: { directory: root },
+    options: {},
+    mcp: {
+      transform: async (edit) => {
+        edit({
+          list: () => [],
+          get: () => undefined,
+          set: (name, value) => {
+            registered.mcp = { name, value }
+          },
+          update: () => {},
+          remove: () => {},
+        })
+      },
+    },
+    tool: {
+      transform: async (edit) => {
+        edit({
+          list: () => [],
+          get: () => undefined,
+          add: () => {},
+          update: () => {},
+          remove: (id) => registered.removed.push(id),
+          namespace: () => {},
+        })
+      },
+    },
+    skill: {
+      transform: async (edit) => {
+        edit({
+          list: () => [],
+          get: () => undefined,
+          add: (value) => {
+            registered.skill = value
+          },
+          update: () => {},
+          remove: () => {},
+        })
+      },
+    },
+  }
+  await serverPlugin.setup(serverCtx)
+  if (!registered.mcp || registered.mcp.name !== "whiteboard") {
+    fail("server auto-registers MCP", JSON.stringify(registered.mcp))
+  }
+  const mcp = registered.mcp.value
+  if (mcp.type !== "local" || !mcp.command?.[1]?.endsWith("mcp-excalidraw-server/dist/index.js")) {
+    fail("server auto-registers MCP", `unexpected command ${JSON.stringify(mcp.command)}`)
+  }
+  if (mcp.environment.EXPRESS_SERVER_URL !== defaultBoard.base) {
+    fail("MCP uses the same board URL", `${mcp.environment.EXPRESS_SERVER_URL} vs ${defaultBoard.base}`)
+  }
+  if (mcp.cwd !== root) fail("MCP cwd is the workspace", `${mcp.cwd} vs ${root}`)
+  if (resolve(mcp.environment.EXCALIDRAW_DATA_DIR) !== defaultBoard.dataDir) {
+    fail("MCP uses the same durable store", `${mcp.environment.EXCALIDRAW_DATA_DIR} vs ${defaultBoard.dataDir}`)
+  }
+  if (
+    !registered.removed.includes("whiteboard_export_to_excalidraw_url") ||
+    !registered.removed.includes("export_to_excalidraw_url")
+  ) {
+    fail("upload tool removed from surface", JSON.stringify(registered.removed))
+  }
+  if (!registered.skill || !registered.skill.content.includes("describe_scene")) {
+    fail("embedded skill registered", JSON.stringify(registered.skill?.id))
+  }
+  ok(
+    "server auto-registers MCP + privacy",
+    `shared store ${defaultBoard.dataRoot}; upload tool removed; skill embedded`,
+  )
 
   const guiBundle = join(root, "dist", "gui-experimental.cjs")
   if (!existsSync(guiBundle)) fail("GUI bundle built", "run npm run build:gui")
@@ -289,7 +400,7 @@ async function run() {
       const init = await client.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify", version: "0.1.0" },
+        clientInfo: { name: "opencode-whiteboard-verify", version: "0.2.0" },
       })
       if (!init?.serverInfo?.name) fail("MCP initialize", JSON.stringify(init))
       client.notify("notifications/initialized")
@@ -435,7 +546,7 @@ async function run() {
     const init = await autoClient.request("initialize", {
       protocolVersion: "2025-11-25",
       capabilities: {},
-      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.1.0" },
+      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.2.0" },
     })
     if (!init?.serverInfo?.name) fail("MCP auto-start initialize", JSON.stringify(init))
     autoClient.notify("notifications/initialized")
@@ -572,7 +683,7 @@ async function run() {
       const init = await sharedClient.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.1.0" },
+        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.2.0" },
       })
       if (!init?.serverInfo?.name) fail("MCP reuses shared backend", JSON.stringify(init))
       sharedClient.notify("notifications/initialized")

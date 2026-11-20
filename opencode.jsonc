@@ -8,22 +8,6 @@
       }
     }
   ],
-  "mcp": {
-    "servers": {
-      "whiteboard": {
-        "type": "local",
-        "command": ["node", "./node_modules/mcp-excalidraw-server/dist/index.js"],
-        "cwd": ".",
-        "environment": {
-          "EXPRESS_SERVER_URL": "http://127.0.0.1:4317",
-          "EXCALIDRAW_DATA_DIR": ".whiteboard/data",
-          "EXCALIDRAW_EXPORT_DIR": "boards",
-          "ENABLE_CANVAS_SYNC": "true",
-          "LOG_LEVEL": "warn"
-        }
-      }
-    }
-  },
   "permissions": [
     {
       "action": "whiteboard_export_to_excalidraw_url",

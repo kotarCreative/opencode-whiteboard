@@ -32,10 +32,17 @@ projects at runtime or build time.
   plugin definition. The app provides the GUI module at runtime; it is not
   bundled.
 
+## Effect and Solid
+
+- Effect: https://effect.website (`effect` 4.1.0, MIT) — schema and runtime
+  primitives used by the GUI contract and the plugin SDK.
+- Solid: https://www.solidjs.com (`solid-js` 1.9.20, MIT) — the window-side
+  runtime the GUI bundle expects the app to provide.
+
 ## Build-time packages
 
-`vite`, `vite-plugin-solid`, `solid-js`, `typescript`, `@types/node`, and
-`electron` (types only) are dev/build dependencies under their respective MIT
-licenses. Their full license texts are in their installed packages.
+`vite`, `vite-plugin-solid`, `typescript`, `@types/node`, and `electron` (types
+only) are dev/build dependencies under their respective MIT licenses. Their full
+license texts are in their installed packages.
 
 No third-party code was copied into this repository.

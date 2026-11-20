@@ -1,16 +1,22 @@
 # OpenCode Whiteboard
 
-A local-first whiteboard for OpenCode: a pinned Excalidraw canvas, a real MCP
-bridge, and an experimental OpenCode Desktop panel. Nothing is sent to a hosted
-service, and no global OpenCode configuration is changed.
+A local-first whiteboard for OpenCode: a pinned Excalidraw canvas, an
+auto-registered MCP bridge, and an experimental OpenCode Desktop panel. Nothing
+is sent to a hosted service, and no global OpenCode configuration is hand-edited.
 
-> **Status: v0.1 prototype.** One board per project, bound explicitly to
-> `http://127.0.0.1:4317`. Opening the board (panel or command) cold-starts the
-> local backend on demand, with no manual `npm run board` at runtime. The
-> Desktop panel is implemented against the documented experimental GUI plugin
-> API; its built bundle is tested here with mocked Electron/host modules, but
-> the **real Desktop runtime is not available in this environment**. The
-> browser/MCP path is tested end to end.
+> **Status: v0.2 one-reference install.** Install with a single
+> `opencode plugin add` Git reference. The server plugin registers the
+> `whiteboard` MCP server itself, removes upstream's upload-to-excalidraw.com
+> tool from the model surface, and contributes the pull-only skill. The built
+> Desktop GUI bundle is tracked in Git and included in the package.
+>
+> This is a **single shared local board** for every project that loads the
+> plugin, not one board per project. Its durable state lives outside the package
+> cache (see [Board identity and scope](#board-identity-and-scope)). The Desktop
+> panel is implemented against the documented experimental GUI plugin API and
+> tested with mocked Electron/host modules; the **real Desktop runtime is not
+> available in this environment**. The browser/MCP path is tested end to end,
+> including a clean Git install in an isolated OpenCode server.
 
 ## Why this shape
 
@@ -22,57 +28,89 @@ closest pieces were:
 | [`yctimlin/mcp_excalidraw`](https://github.com/yctimlin/mcp_excalidraw) `mcp-excalidraw-server` 2.2.0 | MIT canvas + 27-tool MCP server + CLI; optional durable local state | No OpenCode Desktop panel |
 | [`soetang/opencode-excalidraw`](https://github.com/soetang/opencode-excalidraw) | Desktop dock/panel for Excalidraw | No MCP bridge |
 
-This prototype reuses the pinned upstream canvas/MCP package instead of
+This package reuses the pinned upstream canvas/MCP package instead of
 reimplementing Excalidraw, and adds the missing OpenCode wiring:
 
-- a **project-local** `opencode.jsonc` MCP server entry;
-- a **shared, single-flight backend lifecycle** used by both the CLI and the
-  Desktop main process, with an explicit single-board scope;
+- a **one-reference Git install** with no local MCP declaration, GUI build, or
+  global config edit;
+- a **shared, single-flight backend lifecycle** used by the CLI, the Desktop
+  main process, and the auto-registered MCP server, with an explicit one-board
+  scope;
 - an **experimental Desktop GUI plugin**: a side `Panel` that embeds the canvas
   in a `WebContentsView`, cold-starts the backend if needed, and contributes a
   single open/close toggle command (also the composer slash command
   **`/whiteboard`**) plus the documented **built-in browser pane**;
-- a project skill that defines **pull-only natural-language** behavior.
+- an **embedded pull-only skill** and removal of upstream's upload tool from the
+  exposed tool surface.
 
 ## Requirements
 
-- Node.js **20+**
+- Node.js **20+** on `PATH` (the MCP and canvas processes run under Node even
+  when OpenCode itself is a compiled binary)
 - OpenCode **2.x**
-- Optional: OpenCode Desktop with the experimental GUI plugin API
-  (the related community plugin requires Desktop **2.2.7+**). The GUI bundle is
-  built against `@opencode/plugin` **2.3.2**.
+- Git and credentials that can read the private repository for a Git install
+- Optional: OpenCode Desktop with the experimental GUI plugin API (the related
+  community plugin requires Desktop **2.2.7+**). The GUI bundle is built against
+  `@opencode/plugin` **2.3.2**.
 - A local Chromium is only needed for the optional UI smoke test.
 
-## Quick start
+## Install (one reference)
+
+```sh
+opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.0
+```
+
+For a private repository, use the Git transport your credentials already
+support. With GitHub CLI:
+
+```sh
+gh auth setup-git
+opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.0
+```
+
+Or use SSH:
+
+```sh
+opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.0'
+```
+
+That command installs the package into OpenCode's plugin cache, adds it to the
+**global** `opencode.json(c)`, and is the whole install. Restart OpenCode (or let
+the config reload), open any project, and:
+
+- `opencode mcp list` / `/mcps` shows **`whiteboard connected`**;
+- the model sees 26 `whiteboard_*` tools (upstream's 27th, the upload tool, is
+  removed);
+- `/whiteboard` toggles the Desktop panel, or **Whiteboard: Toggle board panel**
+  does the same from the palette;
+- the embedded `whiteboard` skill teaches pull-only usage.
+
+No `npm ci`, `npm run build:gui`, MCP entry, or global JSON edit is required.
+The built GUI bundle (`dist/gui-experimental.cjs`) is tracked and shipped.
+
+See [INSTALL.md](INSTALL.md) for the release procedure and the older portable
+archive path. The v0.1 archive assets remain as published and are not updated.
+
+### Development checkout
+
+To work on this repository itself:
 
 ```sh
 git clone https://github.com/kotarCreative/opencode-whiteboard.git
 cd opencode-whiteboard
 npm ci --ignore-scripts
 npm run build:gui
-```
-
-That is enough to open OpenCode in this directory:
-
-```sh
 opencode
 ```
 
-For a prebuilt private prerelease download that needs no GUI build, see
-[INSTALL.md](INSTALL.md).
-
-Run the full verification suite with `npm test` (see
-[Verification](#verification)).
-
-The project `opencode.jsonc` adds the `whiteboard` MCP server. Opening the
-board from the Desktop panel/command cold-starts the canvas; the first MCP tool
-call also starts it if it is not already running. Nothing needs `npm run board`
-at runtime.
+The checkout's `opencode.jsonc` loads the same package from `.`; the server part
+still auto-registers MCP. `dist/` is tracked, so a plain Git install needs no
+build.
 
 `npm run board` is still available for a browser-first workflow or manual
 operation. It starts the same canvas on `http://127.0.0.1:4317`, with durable
-state in `.whiteboard/data`, exports in `boards/`, and a log in
-`.whiteboard/board.log`:
+state in the user-level board store (see below), exports there too, and a log
+under its `state/` directory:
 
 ```sh
 npm run board
@@ -80,8 +118,8 @@ npm run board
 
 Open that URL in a browser to watch or edit the board. Check `/mcps` in the TUI
 (or `opencode mcp list` against a server that loaded this project) and use the
-27 `whiteboard_*` tools. The MCP server runs locally over stdio; it is not an
-HTTP endpoint.
+26 exposed `whiteboard_*` tools. The MCP server runs locally over stdio; it is
+not an HTTP endpoint.
 
 ### Desktop panel (experimental)
 
@@ -113,20 +151,36 @@ The GUI API is experimental and may change. This environment has the OpenCode
 CLI but not Desktop, so the real Electron window path is not run here. The
 built bundle is exercised with mocked Electron/host modules: main-process cold
 start, embed creation, idempotent ensure, and the `/whiteboard` toggle command
-all run against the real bundle and a real canvas process. OpenCode 2.0.32
-(`opencode plugin list`) recognizes this project package as
-`opencode-whiteboard@0.1.0` from `.`, and the MCP bridge connects with 27 tools.
+all run against the real bundle and a real canvas process. The install
+verification loads the package through the real OpenCode server and confirms
+the installed GUI bundle, auto-registered MCP connection, 26-tool surface, and
+embedded skill.
 
-OpenCode's V2 docs say Desktop loads GUI parts of plugins listed in the
-**global** `opencode.json(c)`. This repo deliberately does not edit global
-configuration. If the panel does not appear in a particular Desktop setup, use
-the browser pane command when available, add the plugin to global config
-yourself, or open `http://127.0.0.1:4317` directly. The canvas itself is still
-the same working board.
+`opencode plugin add` writes the plugin into the **global**
+`opencode.json(c)`, which is exactly what OpenCode Desktop reads for GUI parts.
+The one-reference install therefore needs no separate Desktop step. If the panel
+does not appear in a particular Desktop build, use **Whiteboard: Open board**
+(browser pane) or open `http://127.0.0.1:4317` directly; the canvas itself is
+still the same working board.
 
 ## Project configuration
 
-`opencode.jsonc` is self-contained and project-local:
+There is nothing to add for a normal install. `opencode plugin add` writes the
+package into the global `plugins` array, and the server part registers the MCP
+server at startup:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["opencode-whiteboard"]
+}
+```
+
+The plugin resolves the pinned upstream MCP and canvas entry points from its own
+installed dependency tree. It sets the same loopback URL, durable directory, and
+export directory as the CLI/Desktop backend. The plugin owns the `whiteboard`
+MCP name; remove any hand-written server with that name. A checkout uses the same
+mechanism through its project-local `opencode.jsonc`:
 
 ```jsonc
 {
@@ -134,30 +188,30 @@ the same working board.
   "plugins": [
     { "package": ".", "options": { "boardUrl": "http://127.0.0.1:4317" } }
   ],
-  "mcp": {
-    "servers": {
-      "whiteboard": {
-        "type": "local",
-        "command": ["node", "./node_modules/mcp-excalidraw-server/dist/index.js"],
-        "cwd": ".",
-        "environment": {
-          "EXPRESS_SERVER_URL": "http://127.0.0.1:4317",
-          "EXCALIDRAW_DATA_DIR": ".whiteboard/data",
-          "EXCALIDRAW_EXPORT_DIR": "boards",
-          "ENABLE_CANVAS_SYNC": "true",
-          "LOG_LEVEL": "warn"
-        }
-      }
-    }
-  },
   "permissions": [
     { "action": "whiteboard_export_to_excalidraw_url", "resource": "*", "effect": "deny" }
   ]
 }
 ```
 
-The deny rule removes upstream's only tool that uploads the scene to
-`excalidraw.com`. There is no share/upload tool in this setup.
+The permission rule is defense in depth for a checkout. The plugin also removes
+`whiteboard_export_to_excalidraw_url` (and the raw `export_to_excalidraw_url`)
+from the effective tool surface, so an installed package needs no config rule.
+There is no share/upload tool in this setup.
+
+Optional plugin options (object form):
+
+| Option | Meaning |
+| --- | --- |
+| `configPath` | Workspace config file instead of the packaged `whiteboard.config.json`. Relative to the package root. |
+| `projectRoot` | Package/workspace root for the config and skill lookup. Relative to the package root. |
+| `mcp: false` | Do not auto-register the `whiteboard` MCP server. |
+| `skill: false` | Do not contribute the embedded whiteboard skill. |
+| `allowUpload: true` | Leave upstream's upload tool exposed. Not recommended; off by default. |
+
+`WHITEBOARD_CONFIG` points the backend, MCP auto-registration, and Desktop main
+process at a different config file. `WHITEBOARD_HOME` overrides the user-level
+board root for isolation or tests.
 
 ## Natural-language usage
 
@@ -173,50 +227,69 @@ and connect it to the existing "Store" box with an arrow labeled "events".
 ```
 
 ```text
-Export the current board to boards/architecture.excalidraw.
+Export the current board to the shared exports directory.
 ```
 
 ```text
-Check which board is bound to this project (run node bin/whiteboard.mjs info).
+Check which board this plugin uses (in a checkout, run node bin/whiteboard.mjs info).
 ```
 
 ```text
 Pull the board again and tell me what changed since the last pull.
 ```
 
-The project skill at `.opencode/skills/whiteboard/SKILL.md` teaches the agent to:
+The skill at `.opencode/skills/whiteboard/SKILL.md` is discovered in a checkout
+and embedded by the server plugin for an installed package. It teaches the agent
+to:
 
 - use `describe_scene` and `get_canvas_screenshot` for **pull**;
-- never use `whiteboard_export_to_excalidraw_url` or any upload/share path;
-- treat the board as the single project-local default board;
+- never use an upload/share path;
+- treat the board as the one shared local default board;
 - re-pull before assuming the canvas is fresh.
 
-"Pull, no send" is therefore both a permission rule and an instruction. Board
+"Pull, no send" is therefore both a tool-surface rule and an instruction. Board
 contents stay in the local canvas process, the local durable directory, and the
 model context the user explicitly asked for.
 
 ## Board identity and scope
 
-There is exactly **one board per project** in v0.1:
+This prototype deliberately exposes **one shared local board** to every project
+that loads the plugin. It is not silently per-project routing; the shared scope
+is chosen, documented, and can be isolated with `WHITEBOARD_HOME`.
 
 | Setting | Value |
 | --- | --- |
 | Board id | `default` |
 | URL | `http://127.0.0.1:4317` (loopback only) |
-| Durable state | `.whiteboard/data/` (gitignored) |
-| Exports | `boards/` |
-| Manifest | `.whiteboard/board.json` (gitignored) |
+| Scope | one shared board for every OpenCode project using this plugin |
+| Durable state | user data root `.../opencode-whiteboard/data/` |
+| Exports | user data root `.../opencode-whiteboard/exports/` |
+| Manifest/lock/log | user data root `.../opencode-whiteboard/state/` |
+
+The user data root is outside npm/Git plugin caches so `opencode plugin update`
+cannot delete board state:
+
+| Platform | Default root |
+| --- | --- |
+| Linux/BSD | `$XDG_DATA_HOME/opencode-whiteboard` or `~/.local/share/opencode-whiteboard` |
+| macOS | `~/Library/Application Support/opencode-whiteboard` |
+| Windows | `%LOCALAPPDATA%\opencode-whiteboard` |
+
+Set `WHITEBOARD_HOME` to override it, for example to keep separate boards per
+workspace or test run. For a custom project-scoped config, set
+`"storage": "project"` and point `WHITEBOARD_CONFIG`/`configPath` at it; relative
+`dataDir`, `exportDir`, and `stateDir` then resolve from the config file's
+directory. Reliable automatic per-project routing is not implemented.
 
 The wrapper refuses non-loopback URLs and refuses to reuse a port that answers
 with a different service identity. There is no port auto-discovery, so an agent
-cannot silently attach to an unrelated board. Startup is single-flight: one
-promise in the process plus an exclusive `.whiteboard/board.lock` across
-processes, with the health check repeated after the lock is taken. A crashed
-lock owner is detected by pid and cleaned up; a live owner is waited for, never
-killed. To use another project, copy the repo and change
-`whiteboard.config.json` plus the matching `opencode.jsonc` values (different
-port and data dir). Multi-board selection is intentionally out of scope for
-v0.1.
+cannot silently attach to an unrelated service. If another canvas already owns
+`127.0.0.1:4317`, the backend reuses it only after the service identity check.
+Startup is single-flight: one promise in the process plus an exclusive
+`board.lock` across processes, with the health check repeated after the lock is
+taken. A crashed lock owner is detected by pid and cleaned up; a live owner is
+waited for, never killed. Multi-board selection is intentionally out of scope
+for v0.2.
 
 Commands:
 
@@ -228,21 +301,22 @@ npm run board:stop     # identity-checked shutdown
 ```
 
 `node bin/whiteboard.mjs ensure` is an alias for `start`. The same
-`bin/lib/backend.mjs` module is used by the CLI and by the Desktop main process
-for cold starts, so validation, retries, and the durable store cannot drift
-between them. The MCP entry points at the same `EXPRESS_SERVER_URL` and
-`EXCALIDRAW_DATA_DIR`; the verification suite asserts that.
+`bin/lib/backend.mjs` module is used by the CLI, the Desktop main process, and
+the server plugin's MCP registration, so validation, retries, and the durable
+store cannot drift between them. The MCP entry points at the same
+`EXPRESS_SERVER_URL` and `EXCALIDRAW_DATA_DIR`; the verification suite asserts
+that.
 
 ### Portability of the install
 
-The checked-in setup is a project-local install: `package: "."` resolves the
-project root, `whiteboard.config.json` lives there, and durable state goes to
-`.whiteboard/data`. For an installed copy of the package, keep the board state
-in the workspace rather than in `node_modules` by passing a `configPath` or
-`projectRoot` plugin option, or `WHITEBOARD_CONFIG` pointing at the workspace
-config. Relative `dataDir`/`exportDir` values resolve from the config file's
-directory. `npm ci --ignore-scripts` is unchanged; no global install or
-configuration is required or performed.
+The packaged `whiteboard.config.json` uses `"storage": "user"`, so a Git-installed
+package never writes into `node_modules` or the OpenCode plugin cache. The
+install is self-contained: pinned dependencies, prebuilt GUI bundle, MCP entry,
+and config all resolve from the installed package, while board state stays in
+the user data root. A checkout can use `"storage": "project"` with
+`package: "."` when self-contained test state is wanted. `npm ci --ignore-scripts`
+is unchanged; no global install or configuration is performed by the package
+itself (the `opencode plugin add` command is the explicit user action).
 
 ## Persistence and freshness
 
@@ -269,65 +343,96 @@ Freshness limits:
 npm test
 ```
 
-What it actually runs (28 checks at the time of writing):
+What it actually runs (29 checks at the time of writing):
 
 1. dependency is pinned to `mcp-excalidraw-server@2.2.0` in `package.json` and
    `package-lock.json`;
 2. the published upstream package has no `preinstall`/`postinstall` hook;
-3. the config keeps the fixed loopback board and denies the upload tool;
-4. the MCP entry and the backend config use the same URL and durable store;
-5. the Desktop GUI bundle exists, externalizes host modules, and contains the
+3. the package version, exports map, shipped `files`, and tracked GUI bundle are
+   correct;
+4. the config keeps the fixed loopback board, uses the user-level store, and
+   denies the upload tool;
+5. the real server part auto-registers the same URL and durable store from the
+   package's own MCP entry; no hand-written MCP block is needed;
+6. the real server part removes both upload tool IDs and contributes the
+   embedded skill;
+7. the Desktop GUI bundle exists, externalizes host modules, and contains the
    cold-start, simplified panel-command, and `/whiteboard` slash wiring;
-6. a real upstream canvas starts on an isolated port with durable state;
-7. the canvas UI is served;
-8. real MCP stdio `initialize` and `tools/list` (27 tools);
-9. MCP creates two boxes and a bound arrow;
-10. MCP pulls the scene and finds the labels;
-11. MCP renders a headless PNG screenshot;
-12. MCP exports a `.excalidraw` file with bound labels;
-13. MCP clears the test canvas;
-14. headless Chromium renders the real UI (skipped if Chromium is absent);
-15. MCP auto-starts a canvas with no manual `board` command;
-16. the shared backend cold-starts with no manual `board` command;
-17. a second start reuses the running canvas;
-18. two concurrent starts produce exactly one spawn and one pid;
-19. a foreign service on the port is rejected and left untouched;
-20. startup succeeds on retry after the conflict clears;
-21. MCP reuses the shared backend and durable store instead of spawning again;
-22. stop is identity-checked and leaves the port free;
-23. the built Desktop bundle's main process cold-starts and creates an embed
+8. a real upstream canvas starts on an isolated port with durable state;
+9. the canvas UI is served;
+10. real MCP stdio `initialize` and `tools/list` (27 raw upstream tools);
+11. MCP creates two boxes and a bound arrow;
+12. MCP pulls the scene and finds the labels;
+13. MCP renders a headless PNG screenshot;
+14. MCP exports a `.excalidraw` file with bound labels;
+15. MCP clears the test canvas;
+16. headless Chromium renders the real UI (skipped if Chromium is absent);
+17. MCP auto-starts a canvas with no manual `board` command;
+18. the shared backend cold-starts with no manual `board` command;
+19. a second start reuses the running canvas;
+20. two concurrent starts produce exactly one spawn and one pid;
+21. a foreign service on the port is rejected and left untouched;
+22. startup succeeds on retry after the conflict clears;
+23. MCP reuses the shared backend and durable store instead of spawning again;
+24. stop is identity-checked and leaves the port free;
+25. the built Desktop bundle's main process cold-starts and creates an embed
     (mocked Electron);
-24. a second ensure reuses that backend;
-25. the built bundle registers exactly one composer slash command, `/whiteboard`,
+26. a second ensure reuses that backend;
+27. the built bundle registers exactly one composer slash command, `/whiteboard`,
     tied to the panel toggle; repeated toggling calls the documented
     `Layout.toggle` API (mock), opening when closed and closing when open, with
     no prompt or model call; the browser fallback opens;
-26. an invalid config is returned to the panel as an error, with no embed;
-27. test state stays under `.whiteboard/` test directories; production
-    persistence uses `.whiteboard/data`;
-28. durable state survives a canvas restart.
+28. an invalid config is returned to the panel as an error, with no embed;
+29. durable state survives a canvas restart.
+
+Test state uses isolated configs/ports; production persistence uses the
+user-level board root. The default board is not touched.
+
+### One-reference Git install verification
+
+```sh
+npm run test:install
+```
+
+This is a separate, heavier check that builds a disposable bare Git remote from
+the current working tree, runs the real
+`opencode plugin add git+file://...#main` with an isolated HOME/config/cache,
+starts a private `opencode serve`, and verifies:
+
+- the package lands in OpenCode's plugin cache with the tracked GUI bundle,
+  server part, MCP dependency, and skill;
+- the server plugin auto-registers `whiteboard` and OpenCode reports
+  **connected** without any MCP config edit;
+- the effective tool catalog has 26 `whiteboard_*` tools and no upload tool;
+- the embedded `whiteboard` skill is registered;
+- an MCP tool call cold-starts the canvas and writes durable state to the
+  user-level store outside the package cache;
+- the installed `dist/gui-experimental.cjs` contains the Desktop
+  cold-start/toggle wiring and host-module externals.
+
+The test does not use the real OpenCode config, credentials, or port 4317. It
+is not part of `npm test` because it needs Git and starts a second OpenCode
+server; run it before publishing a tag.
 
 The Desktop bundle checks use mocked Electron and host modules because Desktop is
 not installed here; they run the real built bundle, the real Ipc code, and a real
-canvas process. The default board and its data directory are not touched by the
-test.
-
-The `opencode.jsonc` MCP entry was validated through config loading and through
-the same MCP command/env; the raw stdio bridge above is the actual transport
-OpenCode uses. In addition, OpenCode 2.0.32 (`opencode plugin list`) recognizes
-this project package as `opencode-whiteboard@0.1.0` from `.`, and
-`opencode mcp list` reports `whiteboard connected`. The real Desktop
-`WebContentsView`/window runtime is not run here.
+canvas process. The Git install test uses the real OpenCode server and package
+cache but still cannot exercise the real Electron `WebContentsView`/window
+runtime. That remains the one unverified layer.
 
 ## Security and supply chain
 
 - Runtime dependencies are pinned exactly: `mcp-excalidraw-server@2.2.0`
-  (canvas/MCP, MIT) and `@opencode/plugin@2.3.2` (plugin/GUI API types, MIT).
-  Both are pinned in the lockfile.
-- The published tarball contains prebuilt `dist/`, fonts, and its MIT license; it
-  has no install scripts. Dependencies are installed with
-  `npm ci --ignore-scripts`; the `electron` dev dependency is present for types
-  only, so its binary download is unnecessary.
+  (canvas/MCP, MIT), `@opencode/plugin@2.3.2` (plugin/GUI API, MIT),
+  `effect@4.1.0`, and `solid-js@1.9.20`. All are pinned in the lockfile.
+- `dist/gui-experimental.cjs` is built and tracked, so a Git install does not
+  run a build or install script. The upstream package has no
+  `preinstall`/`postinstall` hook.
+- The MCP server is auto-registered from the pinned package dependency. Its
+  command uses the package's own `node_modules`, and the environment points at
+  the same URL/data path as the shared backend.
+- Upstream's upload tool is removed from the exposed tool surface. The checkout
+  config also keeps a permission deny rule as defense in depth.
 - The canvas binds `127.0.0.1` only. No account, API key, tunnel, container, or
   hosted service is added.
 - Upstream's REST/WS API has no authentication. Do not bind it to a non-loopback
@@ -335,20 +440,21 @@ this project package as `opencode-whiteboard@0.1.0` from `.`, and
 - `npm audit` reports vulnerabilities inherited from upstream's dependency tree
   (27 at install time, 3 high). They were not force-upgraded because that would
   break the pinned, tested upstream. Review before production use.
-- No global OpenCode config, plugin directory, or credential store is modified.
-  Nothing is published to a public registry; the private prerelease described in
-  [INSTALL.md](INSTALL.md) is a download-only test artifact.
+- The package itself does not modify global config or credentials.
+  `opencode plugin add` is the explicit user action that writes the plugin entry.
+  Nothing is published to a public registry; the older private prerelease zip is
+  a download-only test artifact.
 
 ## Files
 
 ```text
 opencode-whiteboard/
-├── opencode.jsonc              project-local MCP + plugin + deny rule
-├── whiteboard.config.json      single-board scope (name, URL, paths)
+├── opencode.jsonc              checkout plugin entry + permission deny rule
+├── whiteboard.config.json      shared board (user storage, URL, paths)
 ├── bin/whiteboard.mjs          start/ensure/status/stop/info wrapper
-├── bin/lib/backend.mjs         shared single-flight backend lifecycle
+├── bin/lib/backend.mjs         shared lifecycle, paths, MCP/canvas resolution
 ├── src/
-│   ├── index.ts                server part (stable id; GUI loadability)
+│   ├── index.ts                server part: auto MCP, privacy, skill
 │   ├── gui.tsx                 GUI plugin entry (setup + main)
 │   └── gui/
 │       ├── contract.ts         typed window <-> main Ipc
@@ -356,13 +462,17 @@ opencode-whiteboard/
 │       ├── main.ts             cold start, WebContentsView, health gate
 │       ├── window.tsx          Panel, `/whiteboard` toggle, launcher, fallback
 │       └── board.tsx           panel UI + fallback card
+├── dist/gui-experimental.cjs   tracked prebuilt Desktop bundle
 ├── scripts/verify.mjs          end-to-end canvas/MCP/GUI-bundle checks
+├── scripts/verify-install.mjs  clean Git remote + OpenCode install test
 ├── .opencode/skills/whiteboard/SKILL.md
-├── boards/                     local .excalidraw exports
-├── .whiteboard/                local durable state (gitignored)
 ├── LICENSE                     MIT
 └── THIRD_PARTY_NOTICES.md
 ```
+
+Local board state lives in the user data root, not in the repository. The
+gitignored `.whiteboard/` directory remains available for `storage: "project"`
+test configs.
 
 ## Known limitations
 
@@ -372,19 +482,21 @@ opencode-whiteboard/
   `Command.slash` API and present in the pinned SDK types; the actual Desktop
   composer runtime is not available here, so the tests verify the `/whiteboard`
   registration and its toggle behavior rather than rendering the composer.
-- Desktop loads GUI parts from its own global plugin list per the V2 docs. No
-  global config or install is changed by this repo.
-- One board per project; no board picker or multi-board naming.
-- The backend keeps running after the panel/tab closes. Stop it explicitly with
-  `npm run board:stop` if you want the port released.
-- No custom MCP facade: upstream's 27 tools are used directly, with the upload
-  tool denied. "Board info" is a CLI command (`npm run board:info`), not an MCP
-  tool.
+- Desktop loads GUI parts from the global plugin entry that
+  `opencode plugin add` writes. The app runtime itself is unverified here.
+- One **shared** board for every project using the plugin; no automatic
+  per-project routing or board picker. Use `WHITEBOARD_HOME` or a project-local
+  config with `"storage": "project"` to separate boards.
+- If another process already owns `127.0.0.1:4317`, the backend reuses it only
+  after the canvas service-identity check. Stop a stale board with
+  `npm run board:stop`; use `WHITEBOARD_CONFIG` for a different port.
+- No custom MCP facade: upstream's 27 raw tools are exposed, with the upload tool
+  removed at the OpenCode tool layer. "Board info" is a CLI command
+  (`npm run board:info`), not an MCP tool.
 - Upstream's browser UI still depends on its own CDN font request.
-- If the project-local GUI entry is not loaded by a particular Desktop build, use
-  the browser pane command when available, add the plugin to global config
-  yourself, or open the loopback URL directly. The canvas itself is still the
-  same working board.
+- If the GUI entry is not loaded by a particular Desktop build, use the browser
+  pane command when available or open the loopback URL directly. The canvas
+  itself is still the same working board.
 
 ## License
 

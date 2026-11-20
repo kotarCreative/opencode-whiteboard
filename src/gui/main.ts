@@ -31,11 +31,10 @@ function optionString(options: { readonly [key: string]: unknown }, key: string)
 }
 
 export const main: Plugin.MainSetup = (ctx) => {
-  // The GUI bundle lives at <package>/dist/gui-experimental.cjs. For the
-  // project-local install this is the project root; `projectRoot`/the
-  // WHITEBOARD_CONFIG environment variable can point an installed package at
-  // the workspace that owns the board instead. Relative options resolve from
-  // the package root, not the Desktop process's working directory.
+  // The GUI bundle lives at <package>/dist/gui-experimental.cjs. For a Git or
+  // npm install this is the package cache root; `projectRoot`, `configPath`,
+  // or WHITEBOARD_CONFIG can point it at a workspace-owned board. Relative
+  // options resolve from the package root, not Desktop's working directory.
   const packageRoot = resolve(__dirname, "..")
   const rootOption = optionString(ctx.options, "projectRoot")
   const projectRoot = rootOption ? resolve(packageRoot, rootOption) : packageRoot

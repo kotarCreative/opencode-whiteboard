@@ -1,166 +1,188 @@
-# Install the private prerelease
+# Install OpenCode Whiteboard v0.2
 
-This is the no-build install path for the v0.1 prototype. The zip is a
-portable copy of the tracked project files plus the prebuilt Desktop GUI bundle
-(`dist/gui-experimental.cjs`). It contains no `node_modules`, no board state,
-and no personal data.
+v0.2 is a one-reference Git install. The package ships its prebuilt Desktop GUI
+bundle, auto-registers the MCP server, and keeps board state outside the package
+cache. No local MCP entry, GUI build, or global JSON edit is required.
 
 The release lives in the private
 [`kotarCreative/opencode-whiteboard`](https://github.com/kotarCreative/opencode-whiteboard)
-repository. Downloading it requires a GitHub account with access to that
-repository. The release itself is private and is not a public distribution.
+repository. Installing it requires Git credentials that can read that repository.
+It is not a public npm package yet. The install below targets the **v0.2.0**
+tag; if that tag is not yet published, substitute a full commit hash.
 
 ## Requirements
 
-- Node.js **20+** (npm is included)
+- Node.js **20+** on `PATH` (the MCP and canvas processes use Node)
 - OpenCode **2.x**
+- Git, plus credentials for the private repository
 - Optional Desktop panel: OpenCode Desktop with the experimental GUI plugin API
   (the related community plugin requires Desktop **2.2.7+**; this bundle is
   built against `@opencode/plugin` **2.3.2**)
-- Internet access for `npm ci` (the pinned dependencies come from npm)
+- Network access for OpenCode to fetch the Git package and its pinned npm
+  dependencies
 
-## 1. Download
+## 1. Install one reference
 
-With the GitHub CLI authenticated as an account that can see the private repo:
-
-```sh
-gh release download v0.1.0-test.1 \
-  --repo kotarCreative/opencode-whiteboard
-```
-
-This downloads the zip and `SHA256SUMS.txt`.
-
-Or open the release page while signed in to GitHub:
-
-<https://github.com/kotarCreative/opencode-whiteboard/releases/tag/v0.1.0-test.1>
-
-Asset: `opencode-whiteboard-0.1.0-portable.zip`
-
-Optionally download and check `SHA256SUMS.txt` from the same release.
-
-## 2. Verify and extract
-
-macOS / Linux:
+HTTPS with GitHub CLI credentials:
 
 ```sh
-sha256sum -c SHA256SUMS.txt        # macOS: shasum -a 256 -c SHA256SUMS.txt
-unzip opencode-whiteboard-0.1.0-portable.zip
-cd opencode-whiteboard-0.1.0
+gh auth setup-git
+opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.0
 ```
 
-Windows PowerShell:
-
-```powershell
-Get-FileHash .\opencode-whiteboard-0.1.0-portable.zip -Algorithm SHA256
-Expand-Archive -Path .\opencode-whiteboard-0.1.0-portable.zip -DestinationPath .
-cd .\opencode-whiteboard-0.1.0
-```
-
-`tar -xf opencode-whiteboard-0.1.0-portable.zip` also works on current
-Windows, macOS, and Linux.
-
-## 3. Install locked dependencies
+SSH:
 
 ```sh
+opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.0'
+```
+
+The command installs the package into OpenCode's plugin cache and adds it to the
+**global** `opencode.json(c)`. That is the whole install. Restart OpenCode if it
+is already running.
+
+> **Private repository auth:** OpenCode uses your existing Git credential helper
+> or SSH agent, the same one `git clone` uses. If `opencode plugin add` reports a
+> clone/authentication failure, verify `git ls-remote` first:
+>
+> ```sh
+> git ls-remote https://github.com/kotarCreative/opencode-whiteboard.git v0.2.0
+> # or
+> git ls-remote git@github.com:kotarCreative/opencode-whiteboard.git v0.2.0
+> ```
+>
+> A release that advertises this command must be reachable through the user's
+> existing Git credentials. Do not put a token in the plugin spec.
+
+## 2. Verify the install
+
+From any OpenCode project:
+
+```sh
+opencode mcp list
+```
+
+The output should include **`whiteboard connected`**. In the TUI, `/mcps` shows
+the same server. The model sees 26 `whiteboard_*` tools; upstream's upload tool
+is removed.
+
+Pull the board:
+
+```text
+Pull the whiteboard into context and summarize the current diagram.
+```
+
+The first MCP tool call cold-starts the loopback canvas. No `npm run board` is
+needed at runtime.
+
+If OpenCode reports a plugin load error, check its server log path from
+`opencode debug paths` and confirm the cache contains
+`node_modules/opencode-whiteboard/dist/gui-experimental.cjs`,
+`src/index.ts`, and `node_modules/mcp-excalidraw-server`. Then run
+`opencode plugin add ...` again.
+
+## 3. Desktop panel
+
+`opencode plugin add` writes the global plugin entry that OpenCode Desktop reads,
+so there is no separate Desktop install. Use **`/whiteboard`** in the composer,
+**Whiteboard: Toggle board panel** from the palette, or the **Whiteboard**
+launcher in the session side-panel **+** menu.
+
+If a particular Desktop build does not load the GUI, use **Whiteboard: Open
+board** (browser pane) or open <http://127.0.0.1:4317> directly. The canvas and
+MCP still work. The real Electron window runtime is not available in the build
+environment; see the caveats below.
+
+## Board data
+
+v0.2 deliberately uses **one shared local board** for every project that loads
+the plugin. It is not per-project routing.
+
+| Platform | Default data root |
+| --- | --- |
+| Linux/BSD | `$XDG_DATA_HOME/opencode-whiteboard` or `~/.local/share/opencode-whiteboard` |
+| macOS | `~/Library/Application Support/opencode-whiteboard` |
+| Windows | `%LOCALAPPDATA%\opencode-whiteboard` |
+
+Inside that root:
+
+```text
+data/       durable Excalidraw scene state
+exports/    .excalidraw exports
+state/      board.json, lock, and log
+```
+
+`opencode plugin update` replaces the package cache; it does not touch this
+directory. To use a separate board or an isolated test board:
+
+```sh
+export WHITEBOARD_HOME="$HOME/.local/share/opencode-whiteboard-work"
+```
+
+For a project-scoped config, create a config with `"storage": "project"` and
+point the plugin/backend at it:
+
+```sh
+export WHITEBOARD_CONFIG=/absolute/path/to/whiteboard.config.json
+```
+
+Relative `dataDir`, `exportDir`, and `stateDir` then resolve from that config's
+directory. See the README for plugin options and the config shape.
+
+## Update or remove
+
+Reinstall with a new tag or commit:
+
+```sh
+opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.0
+```
+
+Exact tags and full commit hashes are reproducible installs. `opencode plugin
+check` reports outdated package plugins; `opencode plugin update` updates
+unpinned Git refs. Re-run `opencode plugin add` with a new tag/commit to move
+deliberately.
+
+Remove with the same configured reference, or delete it from the global
+`plugins` array:
+
+```sh
+opencode plugin remove 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.0'
+```
+
+Board data under the user data root is not removed automatically.
+
+## Development or no-Git install
+
+A normal developer checkout still works:
+
+```sh
+git clone https://github.com/kotarCreative/opencode-whiteboard.git
+cd opencode-whiteboard
 npm ci --ignore-scripts
-```
-
-`.npmrc` already sets `ignore-scripts=true`. There is **no build step**: the
-GUI bundle is already in `dist/`. Do not run `npm run build:gui` just to install.
-
-## 4. Open the board
-
-From the extracted directory:
-
-```sh
+npm run build:gui
 opencode
 ```
 
-The project `opencode.jsonc` loads the `whiteboard` MCP server. Open `/mcps`
-(or run `opencode mcp list`) and the whiteboard should be connected. The first
-tool call starts the loopback canvas automatically.
+The checkout's `opencode.jsonc` loads the package from `.`; the server part
+auto-registers MCP. The GUI bundle is tracked, so a Git package install does not
+build it.
 
-For a browser-first check:
+## Older v0.1 archive
 
-```sh
-npm run board
-```
-
-Then open <http://127.0.0.1:4317>. Durable state is created on first use under
-`.whiteboard/data`; exports go to `boards/`.
-
-Optional verification (uses isolated test ports and does not touch the default
-board):
-
-```sh
-node scripts/verify.mjs
-```
-
-## 5. Optional: Desktop panel
-
-The browser/MCP path works with the project config alone. OpenCode Desktop only
-loads GUI parts from plugins listed in the **global** `opencode.json(c)`, so the
-panel needs one global entry.
-
-Edit your global config:
-
-| Platform | Path |
-| --- | --- |
-| Linux / macOS | `~/.config/opencode/opencode.jsonc` (or `$XDG_CONFIG_HOME/opencode/opencode.jsonc`) |
-| Windows | `%USERPROFILE%\.config\opencode\opencode.jsonc` |
-
-Add the **absolute path** of the extracted directory to the existing `plugins`
-array. If the file does not exist, create it with:
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    "/absolute/path/to/opencode-whiteboard-0.1.0"
-  ]
-}
-```
-
-Windows example (forward slashes are accepted):
-
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": [
-    "C:/Users/you/opencode-whiteboard-0.1.0"
-  ]
-}
-```
-
-Keep any other global settings and plugin entries. Relative paths in the global
-config resolve from the global config directory, so use an absolute path here.
-
-Restart OpenCode Desktop. Check **Settings > Extensions > Plugins** for
-`opencode-whiteboard`, then use `/whiteboard` in the composer or the
-**Whiteboard: Toggle board panel** command. The same command opens the panel in
-the side region; closing it leaves the canvas and MCP running.
-
-The global entry makes the panel available in every Desktop project, but its
-backend is the extracted copy's `whiteboard.config.json` and `.whiteboard/data`.
-To bind it to a different workspace, add plugin options such as
-`"projectRoot"` or `"configPath"` in the object form. For this prototype, the
-simplest setup is to run OpenCode from the extracted directory.
+The v0.1 portable zip release (`v0.1.0-test.1`) remains available as published
+and is not updated. It required extracting the archive, running
+`npm ci --ignore-scripts`, and optionally adding the extracted directory to the
+global plugin list. Prefer the v0.2 one-reference install above.
 
 ## Caveats
 
 - The real Electron Desktop window path was not available in the build
-  environment. The bundle is tested against mocked Electron/host modules, real
-  IPC code, and a real canvas process. If the panel shows its retry card on a
-  particular Desktop build, use **Whiteboard: Open board** (browser pane) or
-  open <http://127.0.0.1:4317> directly; the same board is still served.
+  environment. The bundle is tested with mocked Electron/host modules, real IPC
+  code, and a real canvas process; a clean Git install is tested against a real
+  isolated OpenCode server.
 - The canvas binds `127.0.0.1` only. Do not expose the port or add a tunnel.
+- One shared board for all projects. Set `WHITEBOARD_HOME` or use a
+  `"storage": "project"` config for separation.
 - The upstream package is pinned to `mcp-excalidraw-server@2.2.0`. `npm audit`
   reports inherited vulnerabilities; they are intentionally not force-upgraded
   for this tested prototype.
-- No global configuration is changed by the archive. The Desktop entry above is
-  the only optional global edit, and you can remove it at any time.
-
-## Remove
-
-Quit OpenCode, delete the extracted directory, and remove the path from the
-global `plugins` array if you added it.
+- No credentials are stored in the plugin package or its config.

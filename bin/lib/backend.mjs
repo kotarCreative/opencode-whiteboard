@@ -3,21 +3,27 @@
 // Both entry points use this module:
 //   - bin/whiteboard.mjs (CLI, scripts, manual operation)
 //   - src/gui/main.ts (OpenCode Desktop main process, cold start/retry)
+//   - src/index.ts (OpenCode server plugin, MCP auto-registration)
 //
 // It never downloads anything, never binds off loopback, and never touches a
 // process that does not identify itself as the pinned canvas service.
 //
 // Startup is single-flight in two layers:
 //   - one promise per process (createBackend instance);
-//   - an exclusive lock file under .whiteboard/ for concurrent processes.
+//   - an exclusive lock file under the board state directory for concurrent
+//     processes.
 
 import { spawn } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
-import { dirname, join, resolve } from "node:path"
+import { homedir } from "node:os"
+import { basename, dirname, join, resolve } from "node:path"
 
 export const SERVICE_ID = "mcp-excalidraw-canvas"
+export const MCP_NAME = "whiteboard"
+export const UPLOAD_TOOL = "export_to_excalidraw_url"
+export const DATA_HOME_ENV = "WHITEBOARD_HOME"
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"])
 
 function sleep(ms) {
@@ -38,35 +44,166 @@ function portOf(target) {
   return Number(target.port || (target.protocol === "https:" ? 443 : 80))
 }
 
-function resolveServerEntry(root, explicit) {
+function homeOf(env) {
+  return env.HOME || env.USERPROFILE || homedir()
+}
+
+function expandHome(value, env) {
+  const home = homeOf(env)
+  if (value === "~") return home
+  if (value.startsWith("~/") || value.startsWith("~\\")) return join(home, value.slice(2))
+  return value
+}
+
+function resolvePath(base, value, env) {
+  return resolve(base, expandHome(String(value), env))
+}
+
+/**
+ * Stable user-level root for the one shared local board. It deliberately lives
+ * outside package caches (npm/Git plugin installs) so updates cannot delete
+ * board state. Override with WHITEBOARD_HOME for isolation or testing.
+ */
+export function defaultDataRoot(env = process.env, platform = process.platform) {
+  const configured = env[DATA_HOME_ENV]?.trim()
+  if (configured) return resolve(expandHome(configured, env))
+  const home = homeOf(env)
+  if (platform === "win32") {
+    const base = env.LOCALAPPDATA || join(home, "AppData", "Local")
+    return join(base, "opencode-whiteboard")
+  }
+  if (platform === "darwin") {
+    return join(home, "Library", "Application Support", "opencode-whiteboard")
+  }
+  const base = env.XDG_DATA_HOME || join(home, ".local", "share")
+  return join(base, "opencode-whiteboard")
+}
+
+/**
+ * Picks the binary used to run the MCP and canvas JS entry points. The
+ * OpenCode server may itself be a compiled binary, so process.execPath is not
+ * always Node. WHITEBOARD_NODE overrides everything.
+ */
+export function resolveNodeCommand(env = process.env, execPath = process.execPath) {
+  const configured = env.WHITEBOARD_NODE?.trim()
+  if (configured) return configured
+  const name = basename(execPath).toLowerCase()
+  if (name === "node" || name === "node.exe") return execPath
+  return "node"
+}
+
+function packageRequire(root) {
+  return createRequire(join(root, "package.json"))
+}
+
+function resolvePackageEntry(root, specifier, fallbackRelative, label) {
+  const require = packageRequire(root)
+  try {
+    return require.resolve(specifier)
+  } catch {
+    // Older/newer layouts may not expose the subpath; resolve the package and
+    // look beside its main entry.
+    try {
+      const main = require.resolve("mcp-excalidraw-server")
+      const entry = join(dirname(main), fallbackRelative)
+      if (existsSync(entry)) return entry
+    } catch {
+      // Fall through to the actionable error below.
+    }
+    throw new Error(`Pinned upstream is missing the ${label}. Run "npm ci --ignore-scripts" in ${root}.`)
+  }
+}
+
+export function resolveServerEntry(root, explicit) {
   if (explicit) {
     const entry = resolve(root, explicit)
     if (!existsSync(entry)) throw new Error(`Configured canvas server entry is missing: ${entry}`)
     return entry
   }
+  return resolvePackageEntry(
+    root,
+    "mcp-excalidraw-server/dist/server.js",
+    "server.js",
+    "canvas server entry",
+  )
+}
 
-  const require = createRequire(join(root, "package.json"))
-  try {
-    return require.resolve("mcp-excalidraw-server/dist/server.js")
-  } catch {
-    // Older/newer layouts may not expose the subpath; resolve the package and
-    // look beside its main entry.
-    const main = require.resolve("mcp-excalidraw-server")
-    const entry = join(dirname(main), "server.js")
-    if (!existsSync(entry)) {
-      throw new Error(
-        `Pinned upstream is missing the canvas server beside ${main}. Run "npm ci --ignore-scripts" in ${root}.`,
-      )
-    }
+export function resolveMcpEntry(root, explicit) {
+  if (explicit) {
+    const entry = resolve(root, explicit)
+    if (!existsSync(entry)) throw new Error(`Configured MCP entry is missing: ${entry}`)
     return entry
   }
+  return resolvePackageEntry(root, "mcp-excalidraw-server/dist/index.js", "index.js", "MCP entry")
 }
 
 function readUpstream(root) {
-  const require = createRequire(join(root, "package.json"))
+  const require = packageRequire(root)
   const packagePath = require.resolve("mcp-excalidraw-server/package.json")
   const pkg = JSON.parse(readFileSync(packagePath, "utf8"))
   return { package: pkg.name, version: pkg.version, license: pkg.license }
+}
+
+/**
+ * Reads whiteboard.config.json once and resolves every path both the MCP
+ * process and the lifecycle wrapper must agree on.
+ *
+ * storage: "user" (the packaged default) keeps the one shared board in a
+ * stable data root outside the package cache. storage: "project" keeps test
+ * and bespoke configs self-contained beside their config file.
+ *
+ * @param {{
+ *   root: string,
+ *   configPath?: string,
+ *   env?: Record<string, string | undefined>,
+ *   serverEntry?: string,
+ *   mcpEntry?: string,
+ * }} options
+ */
+export function loadBoardConfig(options) {
+  const root = resolve(options.root)
+  const env = options.env ?? process.env
+  const configured = options.configPath ?? env.WHITEBOARD_CONFIG
+  const configPath = configured
+    ? resolve(root, expandHome(String(configured), env))
+    : join(root, "whiteboard.config.json")
+  const configDir = dirname(configPath)
+  const config = JSON.parse(readFileSync(configPath, "utf8"))
+  const url = new URL(config.url)
+  assertLoopback(url)
+
+  const storage = config.storage === "user" ? "user" : "project"
+  const dataRoot =
+    storage === "user"
+      ? config.dataRoot
+        ? resolvePath(defaultDataRoot(env), config.dataRoot, env)
+        : defaultDataRoot(env)
+      : configDir
+  const dataDir = resolvePath(dataRoot, config.dataDir ?? "data", env)
+  const exportDir = resolvePath(dataRoot, config.exportDir ?? "exports", env)
+  const stateDir = resolvePath(dataRoot, config.stateDir ?? (storage === "user" ? "state" : ".whiteboard"), env)
+  const base = url.href.replace(/\/$/, "")
+
+  return {
+    root,
+    config,
+    configPath,
+    configDir,
+    storage,
+    dataRoot,
+    dataDir,
+    exportDir,
+    stateDir,
+    base,
+    url,
+    port: portOf(url),
+    manifestPath: join(stateDir, "board.json"),
+    lockPath: join(stateDir, "board.lock"),
+    logFile: join(stateDir, "board.log"),
+    serverEntry: resolveServerEntry(root, options.serverEntry),
+    mcpEntry: resolveMcpEntry(root, options.mcpEntry),
+    upstream: readUpstream(root),
+  }
 }
 
 /**
@@ -79,26 +216,26 @@ function readUpstream(root) {
  *   nodePath?: string,
  *   spawnEnv?: Record<string, string | undefined>,
  *   serverEntry?: string,
+ *   mcpEntry?: string,
  *   log?: (level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>) => void,
  * }} options
  */
 export function createBackend(options) {
-  const root = resolve(options.root)
+  const paths = loadBoardConfig(options)
+  const root = paths.root
   const env = options.env ?? process.env
-  const configPath = resolve(root, options.configPath ?? env.WHITEBOARD_CONFIG ?? "whiteboard.config.json")
-  const configDir = dirname(configPath)
-  const config = JSON.parse(readFileSync(configPath, "utf8"))
-  const url = new URL(config.url)
-  assertLoopback(url)
-  const base = url.href.replace(/\/$/, "")
-  const dataDir = resolve(configDir, config.dataDir)
-  const exportDir = resolve(configDir, config.exportDir)
-  const stateDir = join(configDir, ".whiteboard")
-  const manifestPath = join(stateDir, "board.json")
-  const lockPath = join(stateDir, "board.lock")
-  const logFile = join(stateDir, "board.log")
-  const serverEntry = resolveServerEntry(root, options.serverEntry)
-  const upstream = readUpstream(root)
+  const config = paths.config
+  const configDir = paths.configDir
+  const url = paths.url
+  const base = paths.base
+  const dataDir = paths.dataDir
+  const exportDir = paths.exportDir
+  const stateDir = paths.stateDir
+  const manifestPath = paths.manifestPath
+  const lockPath = paths.lockPath
+  const logFile = paths.logFile
+  const serverEntry = paths.serverEntry
+  const upstream = paths.upstream
   const nodePath = options.nodePath ?? process.execPath
   const spawnEnv = options.spawnEnv ?? {}
   const log = options.log ?? (() => {})
@@ -110,7 +247,9 @@ export function createBackend(options) {
     boardId: config.name,
     boardName: config.name,
     scope: config.scope,
+    storage: paths.storage,
     projectRoot: configDir,
+    dataRoot: paths.dataRoot,
     url: base,
     dataDir,
     exportDir,
@@ -137,14 +276,14 @@ export function createBackend(options) {
         return {
           ok: false,
           code: "foreign",
-          reason: `Port ${portOf(url)} answered with a non-canvas response; refusing to reuse it.`,
+          reason: `Port ${paths.port} answered with a non-canvas response; refusing to reuse it.`,
         }
       }
       if (body?.service !== SERVICE_ID) {
         return {
           ok: false,
           code: "foreign",
-          reason: `Port ${portOf(url)} is occupied by a different service; refusing to reuse it.`,
+          reason: `Port ${paths.port} is occupied by a different service; refusing to reuse it.`,
           body,
         }
       }
@@ -277,7 +416,7 @@ export function createBackend(options) {
     const childEnv = {
       ...env,
       ...spawnEnv,
-      PORT: String(portOf(url)),
+      PORT: String(paths.port),
       HOST: url.hostname.replace(/^\[|\]$/g, ""),
       EXPRESS_SERVER_URL: base,
       EXCALIDRAW_DATA_DIR: dataDir,
@@ -333,7 +472,7 @@ export function createBackend(options) {
       throw new Error(
         existing.code === "foreign"
           ? existing.reason
-          : `Port ${portOf(url)} is occupied (${existing.reason}); refusing to reuse it.`,
+          : `Port ${paths.port} is occupied (${existing.reason}); refusing to reuse it.`,
       )
     }
 
@@ -450,5 +589,19 @@ export function createBackend(options) {
     }
   }
 
-  return { boardInfo, config, configPath, health, ensure, status, stop, info, manifestPath, logFile }
+  return {
+    boardInfo,
+    config,
+    configPath: paths.configPath,
+    paths,
+    serverEntry,
+    mcpEntry: paths.mcpEntry,
+    health,
+    ensure,
+    status,
+    stop,
+    info,
+    manifestPath,
+    logFile,
+  }
 }

@@ -1,7 +1,8 @@
 {
   "name": "default",
   "url": "http://127.0.0.1:4317",
-  "dataDir": ".whiteboard/data",
-  "exportDir": "boards",
-  "scope": "single board bound to this project"
+  "storage": "user",
+  "dataDir": "data",
+  "exportDir": "exports",
+  "scope": "one shared local board for every OpenCode project using this plugin"
 }

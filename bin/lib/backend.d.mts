@@ -1,10 +1,16 @@
 export const SERVICE_ID: "mcp-excalidraw-canvas"
+export const MCP_NAME: "whiteboard"
+export const UPLOAD_TOOL: "export_to_excalidraw_url"
+export const DATA_HOME_ENV: "WHITEBOARD_HOME"
 
 export interface BoardConfig {
   readonly name: string
   readonly url: string
-  readonly dataDir: string
-  readonly exportDir: string
+  readonly dataDir?: string
+  readonly exportDir?: string
+  readonly stateDir?: string
+  readonly storage?: "user" | "project"
+  readonly dataRoot?: string
   readonly scope: string
 }
 
@@ -28,7 +34,9 @@ export interface Manifest extends Record<string, unknown> {
   readonly boardId: string
   readonly boardName: string
   readonly scope: string
+  readonly storage: "user" | "project"
   readonly projectRoot: string
+  readonly dataRoot: string
   readonly url: string
   readonly dataDir: string
   readonly exportDir: string
@@ -37,6 +45,27 @@ export interface Manifest extends Record<string, unknown> {
   readonly createdAt?: string
   readonly lastStartedAt?: string
   readonly pid?: number | null
+}
+
+export interface BoardPaths {
+  readonly root: string
+  readonly config: BoardConfig
+  readonly configPath: string
+  readonly configDir: string
+  readonly storage: "user" | "project"
+  readonly dataRoot: string
+  readonly dataDir: string
+  readonly exportDir: string
+  readonly stateDir: string
+  readonly base: string
+  readonly url: URL
+  readonly port: number
+  readonly manifestPath: string
+  readonly lockPath: string
+  readonly logFile: string
+  readonly serverEntry: string
+  readonly mcpEntry: string
+  readonly upstream: Manifest["upstream"]
 }
 
 export interface EnsureResult {
@@ -61,6 +90,9 @@ export interface Backend {
   readonly boardInfo: (extra?: Record<string, unknown>) => Manifest
   readonly config: BoardConfig
   readonly configPath: string
+  readonly paths: BoardPaths
+  readonly serverEntry: string
+  readonly mcpEntry: string
   readonly manifestPath: string
   readonly logFile: string
   health(timeoutMs?: number): Promise<HealthResult>
@@ -70,6 +102,28 @@ export interface Backend {
   info(): Promise<StatusResult>
 }
 
+export function defaultDataRoot(
+  env?: Record<string, string | undefined>,
+  platform?: NodeJS.Platform,
+): string
+
+export function resolveNodeCommand(
+  env?: Record<string, string | undefined>,
+  execPath?: string,
+): string
+
+export function resolveServerEntry(root: string, explicit?: string): string
+
+export function resolveMcpEntry(root: string, explicit?: string): string
+
+export function loadBoardConfig(options: {
+  root: string
+  configPath?: string
+  env?: Record<string, string | undefined>
+  serverEntry?: string
+  mcpEntry?: string
+}): BoardPaths
+
 export function createBackend(options: {
   root: string
   configPath?: string
@@ -77,5 +131,6 @@ export function createBackend(options: {
   nodePath?: string
   spawnEnv?: Record<string, string | undefined>
   serverEntry?: string
+  mcpEntry?: string
   log?: (level: "debug" | "info" | "warn" | "error", message: string, data?: Record<string, unknown>) => void
 }): Backend

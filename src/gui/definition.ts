@@ -4,7 +4,7 @@ export const definition = Plugin.define({
   i18n: {
     en: {
       "panel.title": "Whiteboard",
-      "panel.subtitle": "Local default board",
+      "panel.subtitle": "Shared local board",
       "panel.loading": "Starting or connecting to the local whiteboard…",
       "panel.unavailable": "Local whiteboard is not reachable",
       "panel.hint": "The local backend starts on demand. Retry to start it again.",
@@ -16,7 +16,7 @@ export const definition = Plugin.define({
       "command.toggle": "Whiteboard: Toggle board panel",
       "command.toggle.description": "Open the whiteboard panel, or close it if it is open",
       "menu.open": "Whiteboard",
-      "menu.description": "Local default board",
+      "menu.description": "Shared local board",
     },
   },
 })
