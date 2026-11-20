@@ -58,6 +58,9 @@ That is enough to open OpenCode in this directory:
 opencode
 ```
 
+For a prebuilt private prerelease download that needs no GUI build, see
+[INSTALL.md](INSTALL.md).
+
 Run the full verification suite with `npm test` (see
 [Verification](#verification)).
 
@@ -333,7 +336,8 @@ this project package as `opencode-whiteboard@0.1.0` from `.`, and
   (27 at install time, 3 high). They were not force-upgraded because that would
   break the pinned, tested upstream. Review before production use.
 - No global OpenCode config, plugin directory, or credential store is modified.
-  Nothing is published.
+  Nothing is published to a public registry; the private prerelease described in
+  [INSTALL.md](INSTALL.md) is a download-only test artifact.
 
 ## Files
 
