@@ -43,53 +43,73 @@ reimplementing Excalidraw, and adds the missing OpenCode wiring:
 - an **embedded pull-only skill** and removal of upstream's upload tool from the
   exposed tool surface.
 
-## Requirements
+## Quick start
 
-- Node.js **20+** on `PATH` (the MCP and canvas processes run under Node even
-  when OpenCode itself is a compiled binary)
-- OpenCode **2.x**
-- Git and credentials that can read the private repository for a Git install
-- Optional: OpenCode Desktop with the experimental GUI plugin API (the related
-  community plugin requires Desktop **2.2.7+**). The GUI bundle is built against
-  `@opencode/plugin` **2.3.2**.
+Requirements:
+
+- **OpenCode 2.x**, with the `opencode` CLI on `PATH`.
+- **Node.js 20+** on `PATH` (the MCP and canvas processes run under Node even
+  when OpenCode itself is a compiled binary).
+- **Git** and network access for OpenCode to fetch the tagged package. The
+  repository is public, so no GitHub account, `gh` login, SSH key, or npm login
+  is needed.
+- Optional: **OpenCode Desktop** for the side panel. The GUI plugin API is
+  experimental; the real Desktop runtime is not available in this build
+  environment (see [Desktop panel](#desktop-panel-experimental)).
 - A local Chromium is only needed for the optional UI smoke test.
 
-## Install (one reference)
+Install the pinned release:
 
 ```sh
-opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.0
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.0'
 ```
 
-For a private repository, use the Git transport your credentials already
-support. With GitHub CLI:
+Then **restart OpenCode Desktop** (quit and reopen it) so the global plugin
+entry and its GUI part are loaded. In the TUI, restart the TUI or run
+`opencode service restart` if the plugin does not appear.
 
-```sh
-gh auth setup-git
-opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.0
-```
+Open any project and use it:
 
-Or use SSH:
+- **Desktop:** press `/whiteboard` in the composer, run **Whiteboard: Toggle
+  board panel** from the command palette, or choose **Whiteboard** from the
+  session side-panel **+** menu. The browser-pane command and a fallback to
+  <http://127.0.0.1:4317> are also available.
+- **TUI:** there is no Desktop side panel and the `/whiteboard` GUI command does
+  not apply. The MCP server and skill still work: `/mcps` (or
+  `opencode mcp list`) should show **`whiteboard connected`**, and the model can
+  pull or edit the board. Open <http://127.0.0.1:4317> in a browser when you want
+  the canvas UI.
+- **Both:** the model sees 26 `whiteboard_*` tools (upstream's 27th, the upload
+  tool, is removed), and the embedded `whiteboard` skill teaches pull-only
+  usage.
 
-```sh
-opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.0'
-```
+No repository clone, `npm ci`, `npm run build:gui`, separate MCP entry, or
+hand-edited global JSON is required. The package ships its prebuilt GUI bundle
+(`dist/gui-experimental.cjs`) and auto-registers the MCP server.
 
-That command installs the package into OpenCode's plugin cache, adds it to the
-**global** `opencode.json(c)`, and is the whole install. Restart OpenCode (or let
-the config reload), open any project, and:
+> **Desktop status:** the panel is implemented against the documented
+> experimental GUI plugin API and tested with mocked Electron/host modules. A
+> real Desktop window has not been confirmed in this environment. If a
+> particular Desktop build does not show it, use **Whiteboard: Open board**
+> (browser pane) or open <http://127.0.0.1:4317> directly; the board and MCP
+> still work.
 
-- `opencode mcp list` / `/mcps` shows **`whiteboard connected`**;
-- the model sees 26 `whiteboard_*` tools (upstream's 27th, the upload tool, is
-  removed);
-- `/whiteboard` toggles the Desktop panel, or **Whiteboard: Toggle board panel**
-  does the same from the palette;
-- the embedded `whiteboard` skill teaches pull-only usage.
+See [INSTALL.md](INSTALL.md) for verification steps, update/remove commands, and
+the older portable archive path. The v0.1 archive assets remain as published and
+are not updated.
 
-No `npm ci`, `npm run build:gui`, MCP entry, or global JSON edit is required.
-The built GUI bundle (`dist/gui-experimental.cjs`) is tracked and shipped.
+## Install details
 
-See [INSTALL.md](INSTALL.md) for the release procedure and the older portable
-archive path. The v0.1 archive assets remain as published and are not updated.
+`opencode plugin add` fetches the tagged Git package into OpenCode's plugin
+cache and adds it to the **global** `opencode.json(c)`. The server plugin
+registers the `whiteboard` MCP server at startup, so there is no second install
+step. `opencode plugin list` shows the installed package; `opencode mcp list`
+shows the connection.
+
+The pinned tag is deliberate: `v0.2.0` is reproducible. To move later, re-run
+`opencode plugin add` with a newer tag or full commit hash. `opencode plugin
+check` reports updates, while `opencode plugin update` only updates unpinned Git
+references.
 
 ### Development checkout
 
@@ -442,8 +462,9 @@ runtime. That remains the one unverified layer.
   break the pinned, tested upstream. Review before production use.
 - The package itself does not modify global config or credentials.
   `opencode plugin add` is the explicit user action that writes the plugin entry.
-  Nothing is published to a public registry; the older private prerelease zip is
-  a download-only test artifact.
+  Nothing is published to a public npm registry; installation uses the tagged
+  public Git repository. The older v0.1 prerelease zip is a download-only test
+  artifact.
 
 ## Files
 
