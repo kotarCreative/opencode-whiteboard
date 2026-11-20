@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.whiteboard/*
+!.whiteboard/.gitkeep
+*.tsbuildinfo
+.DS_Store

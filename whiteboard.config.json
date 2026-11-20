@@ -1,0 +1,7 @@
+{
+  "name": "default",
+  "url": "http://127.0.0.1:4317",
+  "dataDir": ".whiteboard/data",
+  "exportDir": "boards",
+  "scope": "single board bound to this project"
+}

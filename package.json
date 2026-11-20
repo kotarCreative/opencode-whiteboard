@@ -1,0 +1,43 @@
+{
+  "name": "opencode-whiteboard",
+  "version": "0.1.0",
+  "description": "Local-first whiteboard for OpenCode: pinned Excalidraw canvas, MCP bridge, and an experimental Desktop panel.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
+  },
+  "files": [
+    "dist",
+    "src",
+    ".opencode",
+    "bin",
+    "whiteboard.config.json"
+  ],
+  "scripts": {
+    "board": "node ./bin/whiteboard.mjs start",
+    "board:status": "node ./bin/whiteboard.mjs status",
+    "board:stop": "node ./bin/whiteboard.mjs stop",
+    "board:info": "node ./bin/whiteboard.mjs info",
+    "mcp": "node ./node_modules/mcp-excalidraw-server/dist/index.js",
+    "build:gui": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:gui && node ./scripts/verify.mjs"
+  },
+  "dependencies": {
+    "@opencode/plugin": "2.3.2",
+    "mcp-excalidraw-server": "2.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "electron": "45.4.1",
+    "solid-js": "1.9.20",
+    "typescript": "5.9.3",
+    "vite": "7.3.8",
+    "vite-plugin-solid": "2.11.17"
+  }
+}
