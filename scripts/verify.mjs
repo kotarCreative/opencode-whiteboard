@@ -9,7 +9,7 @@
 import { spawn, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
-import Module, { createRequire } from "node:module"
+import Module, { createRequire, isBuiltin } from "node:module"
 import { createServer } from "node:http"
 import { createInterface } from "node:readline"
 import { dirname, join, resolve } from "node:path"
@@ -102,6 +102,85 @@ function parseJson(result, label) {
   }
 }
 
+// --- GUI bundle evaluation --------------------------------------------------
+// OpenCode Desktop evaluates a plugin's ./gui-experimental bundle as CommonJS
+// text with exactly these bindings:
+//
+//   new Function("require", "module", "exports", code)(host.require, module, module.exports)
+//
+// (packages/plugin/src/gui/host.ts, evaluatePluginBundle). It has no
+// __dirname, __filename, or import.meta.url. Reproduce that call rather than
+// require()ing the file, so the check catches Node-only module assumptions.
+const guiWindowModules = new Set([
+  "solid-js",
+  "solid-js/web",
+  "solid-js/store",
+  "@opencode/client/solid",
+  "@opencode/plugin/gui/file",
+  "@opencode/plugin/gui/review",
+  "@opencode/plugin/gui/browser",
+])
+const guiNative = createRequire(import.meta.url)
+
+function inertGuiModule(name) {
+  const label = `[inert module ${name}]`
+  const inert = new Proxy(function inert() {}, {
+    get(_, key) {
+      if (key === "then") return undefined
+      if (key === Symbol.toPrimitive || key === "toString") return () => label
+      if (key === Symbol.hasInstance) return () => false
+      return inert
+    },
+    set: () => true,
+    defineProperty: () => true,
+    deleteProperty: () => true,
+    apply: () => inert,
+    construct: () => inert,
+  })
+  return inert
+}
+
+async function evaluateGuiBundle(code, processName) {
+  const names = [
+    "effect",
+    "@opencode/plugin/gui",
+    "@opencode/plugin/gui/main",
+    "@opencode/plugin/gui/browser",
+    "@opencode/plugin/rpc",
+    "@opencode/schema/rpc",
+    "@opencode/client",
+    "@opencode/client/effect",
+    "solid-js",
+    "solid-js/web",
+    "solid-js/store",
+  ]
+  const modules = new Map(
+    await Promise.all(
+      names.map(async (name) => {
+        try {
+          return [name, await import(name)]
+        } catch {
+          return [name, undefined]
+        }
+      }),
+    ),
+  )
+  const module = { exports: {} }
+  new Function("require", "module", "exports", code)((name) => {
+    if (name === "electron") return { WebContentsView: class WebContentsView {} }
+    if (isBuiltin(name)) return processName === "main" ? guiNative(name) : inertGuiModule(name)
+    if (processName === "main" && guiWindowModules.has(name)) return inertGuiModule(name)
+    // Node resolves Solid to its server build; the window host supplies its
+    // browser build. A structural placeholder keeps setup free of server-only
+    // DOM shims while the real window modules stay external in the bundle.
+    if (processName === "window" && /^solid-js(\/|$)/.test(name)) return inertGuiModule(name)
+    const value = modules.get(name)
+    if (value) return value
+    throw new Error(`Plugin GUI bundle requires a module the app does not share: ${name}`)
+  }, module, module.exports)
+  return module.exports.default
+}
+
 class McpClient {
   constructor(child) {
     this.child = child
@@ -190,7 +269,7 @@ async function run() {
   }
   ok("upstream package checked", "no preinstall/postinstall hook")
 
-  if (pkg.version !== "0.2.0") fail("package version", pkg.version)
+  if (pkg.version !== "0.2.1") fail("package version", pkg.version)
   if (pkg.exports?.["./gui-experimental"] !== "./dist/gui-experimental.cjs") {
     fail("package exports", JSON.stringify(pkg.exports))
   }
@@ -241,24 +320,37 @@ async function run() {
   // contributes the skill without a project-local config edit. Transpile in
   // memory so the check also runs on Node 20, which cannot import .ts directly.
   const source = await readFile(join(root, "src", "index.ts"), "utf8")
-  const transpiled = transpileModule(source, {
+  const rpcSource = await readFile(join(root, "src", "rpc.ts"), "utf8")
+  const options = {
     compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2022, verbatimModuleSyntax: false },
-  }).outputText
+  }
+  const rpcPath = join(root, "src", `.verify-rpc-${process.pid}.mjs`)
   const transpiledPath = join(root, "src", `.verify-index-${process.pid}.mjs`)
-  await writeFile(transpiledPath, transpiled)
+  await writeFile(rpcPath, transpileModule(rpcSource, options).outputText)
+  await writeFile(
+    transpiledPath,
+    transpileModule(source, options).outputText.replace('from "./rpc"', `from "./.verify-rpc-${process.pid}.mjs"`),
+  )
   let serverPlugin
   try {
     serverPlugin = (await import(pathToFileURL(transpiledPath).href)).default
   } finally {
     await rm(transpiledPath, { force: true })
+    await rm(rpcPath, { force: true })
   }
   if (serverPlugin.id !== "opencode-whiteboard" || typeof serverPlugin.setup !== "function") {
     fail("server plugin exports", "missing id/setup")
   }
-  const registered = { mcp: null, removed: [], skill: null }
+  const registered = { mcp: null, removed: [], skill: null, rpc: null }
   const serverCtx = {
     location: { directory: root },
     options: {},
+    rpc: {
+      register: async (definition, handlers) => {
+        registered.rpc = { definition, handlers }
+        return { events: { emit: async () => {} }, dispose: () => {} }
+      },
+    },
     mcp: {
       transform: async (edit) => {
         edit({
@@ -322,9 +414,21 @@ async function run() {
   if (!registered.skill || !registered.skill.content.includes("describe_scene")) {
     fail("embedded skill registered", JSON.stringify(registered.skill?.id))
   }
+  if (registered.rpc?.definition.id !== "opencode-whiteboard" || !registered.rpc.handlers.paths) {
+    fail("server exposes ESM path handoff", JSON.stringify(registered.rpc?.definition?.id))
+  }
+  const handedOff = await registered.rpc.handlers.paths({}, {
+    signal: new AbortController().signal,
+    error: () => {
+      throw new Error("unexpected rpc error")
+    },
+  })
+  if (handedOff.root !== root || handedOff.configPath !== defaultBoard.configPath) {
+    fail("server path handoff", JSON.stringify(handedOff))
+  }
   ok(
     "server auto-registers MCP + privacy",
-    `shared store ${defaultBoard.dataRoot}; upload tool removed; skill embedded`,
+    `shared store ${defaultBoard.dataRoot}; upload tool removed; skill embedded; ESM path handoff`,
   )
 
   const guiBundle = join(root, "dist", "gui-experimental.cjs")
@@ -333,13 +437,81 @@ async function run() {
   if (!bundle.includes('require("electron")') || !bundle.includes('require("solid-js')) {
     fail("GUI bundle externalizes host modules", "expected external electron and solid-js requires")
   }
-  for (const required of ["ELECTRON_RUN_AS_NODE", "toggle-board-panel", "whiteboard.config.json"]) {
+  for (const token of ["__dirname", "__filename"]) {
+    if (bundle.includes(token)) {
+      fail("GUI bundle has no CommonJS path globals", `bundle references ${token}; Desktop supplies neither`)
+    }
+  }
+  for (const required of ["ELECTRON_RUN_AS_NODE", "toggle-board-panel", "whiteboard.config.json", "opencode-whiteboard"]) {
     if (!bundle.includes(required)) fail("GUI bundle cold-start wiring", `missing ${required}`)
   }
   for (const removed of ["open-board-panel", "close-board-panel"]) {
     if (bundle.includes(removed)) fail("GUI bundle simplified commands", `stale command ${removed}`)
   }
-  ok("GUI bundle", `${(await stat(guiBundle)).size} bytes, host modules external, cold start + panel commands included`)
+
+  // Main process: the official loader bindings, real shared modules, Node
+  // built-ins, and placeholders for window-only modules. Invoking `main` is
+  // what used to throw "__dirname is not defined".
+  const mainPlugin = await evaluateGuiBundle(bundle, "main")
+  if (!mainPlugin || typeof mainPlugin.main !== "function") {
+    fail("GUI main under Desktop loader", "default export has no main setup")
+  }
+  let embed
+  const mainCtx = {
+    options: {},
+    log: { write: () => {} },
+    windows: { on: () => {}, get: () => undefined },
+    onCleanup: () => {},
+    provide: (_token, value) => {
+      embed = value
+    },
+    embeds: {},
+    // The path handoff is read lazily, on the first cold start. Point it at a
+    // package root without a config so ensure() fails before spawning
+    // anything; the regression is evaluation and path safety, not a new board.
+    client: {
+      rpc: () => ({
+        paths: async () => ({
+          root: join(root, ".whiteboard", "missing-package"),
+          configPath: "",
+        }),
+      }),
+    },
+  }
+  await mainPlugin.main(mainCtx)
+  if (!embed || typeof embed.ensure !== "function" || typeof embed.acquire !== "function") {
+    fail("GUI main under Desktop loader", "WhiteboardEmbed Ipc was not provided")
+  }
+  const failedEnsure = await embed.ensure()
+  if (failedEnsure.ok !== false || typeof failedEnsure.error !== "string") {
+    fail("GUI main path handoff", JSON.stringify(failedEnsure))
+  }
+
+  // Window process: Node built-ins and Electron are inert placeholders, and
+  // module scope plus setup must stay runnable without them.
+  const windowPlugin = await evaluateGuiBundle(bundle, "window")
+  if (!windowPlugin || typeof windowPlugin.setup !== "function") {
+    fail("GUI window under Desktop loader", "default export has no setup")
+  }
+  const windowCtx = {
+    options: { boardUrl: "http://127.0.0.1:4317" },
+    app: { platform: "web" },
+    id: "opencode-whiteboard",
+    t: (key) => key,
+    use: () => () => ({ status: "inactive" }),
+    main: () => ({ ensure: async () => ({ ok: false, url: "", error: "test" }) }),
+    add: () => () => {},
+    layout: { open: () => {}, toggle: () => {}, state: () => "closed" },
+    sessions: { current: () => undefined },
+    toast: { show: () => {} },
+    system: { openExternal: () => {} },
+  }
+  await windowPlugin.setup(windowCtx)
+
+  ok(
+    "GUI bundle",
+    `${(await stat(guiBundle)).size} bytes, loads in both Desktop processes without __dirname/__filename`,
+  )
 
   // --- Isolated canvas ---------------------------------------------------------
   await rm(dataDir, { recursive: true, force: true })
@@ -400,7 +572,7 @@ async function run() {
       const init = await client.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify", version: "0.2.0" },
+        clientInfo: { name: "opencode-whiteboard-verify", version: "0.2.1" },
       })
       if (!init?.serverInfo?.name) fail("MCP initialize", JSON.stringify(init))
       client.notify("notifications/initialized")
@@ -546,7 +718,7 @@ async function run() {
     const init = await autoClient.request("initialize", {
       protocolVersion: "2025-11-25",
       capabilities: {},
-      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.2.0" },
+      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.2.1" },
     })
     if (!init?.serverInfo?.name) fail("MCP auto-start initialize", JSON.stringify(init))
     autoClient.notify("notifications/initialized")
@@ -683,7 +855,7 @@ async function run() {
       const init = await sharedClient.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.2.0" },
+        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.2.1" },
       })
       if (!init?.serverInfo?.name) fail("MCP reuses shared backend", JSON.stringify(init))
       sharedClient.notify("notifications/initialized")
@@ -792,6 +964,7 @@ async function run() {
     if (request === "solid-js") return fakeSolid
     if (request === "@opencode/plugin/gui") return fakeGui
     if (request === "@opencode/plugin/gui/browser") return {}
+    if (request === "@opencode/plugin/rpc") return { Rpc: { define: (spec) => spec } }
     return load.call(this, request, parent, isMain)
   }
 
@@ -805,9 +978,14 @@ async function run() {
     const caller = { window: 1, signal: new AbortController().signal }
     const mainCtx = {
       id: "opencode-whiteboard",
-      options: { configPath: desktopConfig },
+      options: {},
       app: { platform: "desktop" },
       log: { write: (...args) => log.push(args) },
+      client: {
+        rpc: () => ({
+          paths: async () => ({ root, configPath: desktopConfig }),
+        }),
+      },
       windows: { get: () => ({}), on: () => () => {} },
       embeds: {
         create: () => ({
@@ -856,6 +1034,7 @@ async function run() {
         }),
       },
       client: {
+        rpc: mainCtx.client.rpc,
         session: {
           prompt: (input) => {
             desktop.prompts.push(input)
@@ -963,7 +1142,11 @@ async function run() {
     let failedImpl
     const failedCtx = {
       ...mainCtx,
-      options: { configPath: join(desktopDir, "missing.json"), boardUrl: first.url },
+      client: {
+        rpc: () => ({
+          paths: async () => ({ root, configPath: join(desktopDir, "missing.json") }),
+        }),
+      },
       provide: (_token, impl) => {
         failedImpl = impl
         return { changed() {}, emit() {}, dispose() {} }

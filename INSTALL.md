@@ -1,6 +1,6 @@
-# Install OpenCode Whiteboard v0.2
+# Install OpenCode Whiteboard v0.2.1
 
-v0.2 is a one-reference Git install. The package ships its prebuilt Desktop GUI
+v0.2.1 is a one-reference Git install. The package ships its prebuilt Desktop GUI
 bundle, auto-registers the MCP server, and keeps board state outside the package
 cache. No local MCP entry, GUI build, or global JSON edit is required.
 
@@ -8,7 +8,7 @@ The release is published in the public
 [`kotarCreative/opencode-whiteboard`](https://github.com/kotarCreative/opencode-whiteboard)
 repository. Installing it does **not** require a GitHub account, `gh` login, SSH
 key, or npm login, and it is not published to npm. The install uses the public
-**v0.2.0** tag.
+**v0.2.1** tag.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ key, or npm login, and it is not published to npm. The install uses the public
 ## 1. Install one reference
 
 ```sh
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.0'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
 ```
 
 The command installs the package into OpenCode's plugin cache and adds it to the
@@ -39,7 +39,7 @@ run `opencode service restart` if the plugin does not appear.
 If you prefer SSH, the equivalent pinned reference is:
 
 ```sh
-opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.0'
+opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.1'
 ```
 
 > **Public repository:** the default HTTPS install reads the public tag
@@ -47,7 +47,7 @@ opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.
 > network/proxy access first:
 >
 > ```sh
-> git ls-remote https://github.com/kotarCreative/opencode-whiteboard.git v0.2.0
+> git ls-remote https://github.com/kotarCreative/opencode-whiteboard.git v0.2.1
 > ```
 >
 > Do not put a token in the plugin spec. No GitHub authentication is needed for
@@ -102,7 +102,7 @@ pane) or open <http://127.0.0.1:4317> directly. The canvas and MCP still work.
 
 ## Board data
 
-v0.2 deliberately uses **one shared local board** for every project that loads
+v0.2.x deliberately uses **one shared local board** for every project that loads
 the plugin. It is not per-project routing.
 
 | Platform | Default data root |
@@ -138,24 +138,34 @@ directory. See the README for plugin options and the config shape.
 
 ## Update or remove
 
-Reinstall with a new tag or commit:
+Pinned tags are exact references. `opencode plugin update` updates unpinned Git
+branches and ranges, but skips exact tags, so upgrade a pinned install by
+removing the old reference and adding the new one:
 
 ```sh
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.0'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.0'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
 ```
 
-Exact tags and full commit hashes are reproducible installs. `opencode plugin
-check` reports outdated package plugins; `opencode plugin update` updates
-unpinned Git refs. Re-run `opencode plugin add` with a new tag/commit to move
-deliberately.
+Remove the old reference first. `opencode plugin add` compares the full
+configured reference, so adding a new tag while the old one remains leaves both
+entries in the global `plugins` array. If you installed over SSH, use the same
+SSH reference in both commands.
+
+Restart OpenCode Desktop after the upgrade so it reloads the GUI bundle, and
+restart the TUI or run `opencode service restart` if the server part does not
+reload. `opencode plugin check` reports available updates. Board data is stored
+outside the package cache and is preserved across remove/add and updates; see
+[Board data](#board-data).
 
 Remove with the same configured reference:
 
 ```sh
-opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.0'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.1'
 ```
 
-Board data under the user data root is not removed automatically.
+Board data under the user data root is not removed automatically. Delete that
+directory yourself only if you intend to discard the board and its exports.
 
 ## Development or no-Git install
 
@@ -178,16 +188,19 @@ build it.
 The v0.1 portable zip release (`v0.1.0-test.1`) remains available as published
 and is not updated. It required extracting the archive, running
 `npm ci --ignore-scripts`, and optionally adding the extracted directory to the
-global plugin list. Prefer the v0.2 one-reference install above. Its bundled
+global plugin list. Prefer the v0.2.x one-reference install above. Its bundled
 README and INSTALL files are historical and still mention the private
 prerelease process.
 
 ## Caveats
 
 - The real Electron Desktop window path was not available in the build
-  environment. The bundle is tested with mocked Electron/host modules, real IPC
-  code, and a real canvas process; a clean Git install is tested against a real
-  isolated OpenCode server.
+  environment. The bundle is tested under the host’s actual CommonJS loader
+  bindings, with a placeholder Electron, real IPC code, and a real canvas
+  process; a clean Git install is tested against a real isolated OpenCode
+  server. v0.2.1 fixes the Desktop-only `__dirname is not defined` startup
+  crash: OpenCode supplies `require`, `module`, and `exports` but no Node path
+  globals or `import.meta.url`.
 - The Desktop GUI plugin API is experimental and may change. The TUI has no
   side panel; use the MCP path and the loopback URL there.
 - The canvas binds `127.0.0.1` only. Do not expose the port or add a tunnel.

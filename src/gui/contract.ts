@@ -1,6 +1,10 @@
 import { Schema } from "effect"
 import { Ipc } from "@opencode/plugin/gui"
 
+// The same RPC token the ESM server part registers. The GUI bundle imports the
+// contract only; it never needs Node's module location.
+export { WhiteboardPaths } from "../rpc"
+
 /**
  * Window -> Electron main bridge for one embedded canvas per window.
  * `id` is null when the local canvas is not reachable; the panel then

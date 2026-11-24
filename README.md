@@ -4,7 +4,7 @@ A local-first whiteboard for OpenCode: a pinned Excalidraw canvas, an
 auto-registered MCP bridge, and an experimental OpenCode Desktop panel. Nothing
 is sent to a hosted service, and no global OpenCode configuration is hand-edited.
 
-> **Status: v0.2 one-reference install.** Install with a single
+> **Status: v0.2.1 one-reference install.** Install with a single
 > `opencode plugin add` Git reference. The server plugin registers the
 > `whiteboard` MCP server itself, removes upstream's upload-to-excalidraw.com
 > tool from the model surface, and contributes the pull-only skill. The built
@@ -14,8 +14,11 @@ is sent to a hosted service, and no global OpenCode configuration is hand-edited
 > plugin, not one board per project. Its durable state lives outside the package
 > cache (see [Board identity and scope](#board-identity-and-scope)). The Desktop
 > panel is implemented against the documented experimental GUI plugin API and
-> tested with mocked Electron/host modules; the **real Desktop runtime is not
-> available in this environment**. The browser/MCP path is tested end to end,
+> tested with the host's actual CommonJS loader contract; the **real Electron
+> window runtime is not available in this environment**. v0.2.1 fixes the
+> Desktop-only `__dirname is not defined` startup crash by resolving the
+> package root in the ESM server part and handing it to the main process over
+> the documented plugin RPC bridge. The browser/MCP path is tested end to end,
 > including a clean Git install in an isolated OpenCode server.
 
 ## Why this shape
@@ -61,7 +64,7 @@ Requirements:
 Install the pinned release:
 
 ```sh
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.0'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
 ```
 
 Then **restart OpenCode Desktop** (quit and reopen it) so the global plugin
@@ -89,8 +92,9 @@ prebuilt GUI bundle (`dist/gui-experimental.cjs`) and auto-registers the MCP
 server.
 
 > **Desktop status:** the panel is implemented against the documented
-> experimental GUI plugin API and tested with mocked Electron/host modules. A
-> real Desktop window has not been confirmed in this environment. If a
+> experimental GUI plugin API and tested under the host's actual CommonJS
+> loader bindings. The real Electron window runtime has not been available in
+> this environment. If a
 > particular Desktop build does not show it, use **Whiteboard: Open board**
 > (browser pane) or open <http://127.0.0.1:4317> directly; the board and MCP
 > still work.
@@ -107,10 +111,19 @@ registers the `whiteboard` MCP server at startup, so there is no second install
 step. `opencode plugin list` shows the installed package; `opencode mcp list`
 shows the connection.
 
-The pinned tag is deliberate: `v0.2.0` is reproducible. To move later, re-run
-`opencode plugin add` with a newer tag or full commit hash. `opencode plugin
-check` reports updates, while `opencode plugin update` only updates unpinned Git
-references.
+The pinned tag is deliberate: `v0.2.1` is reproducible. `opencode plugin check`
+reports updates, while `opencode plugin update` only updates unpinned Git
+references. Exact tags are pinned, so upgrade a pinned install by removing the
+old reference and adding the new one:
+
+```sh
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.0'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+```
+
+`plugin add` matches the configured reference exactly, so remove the old tag
+first; otherwise both pinned entries stay in the global `plugins` array. Board
+state is outside the package cache and is preserved.
 
 ### Development checkout
 
@@ -170,10 +183,13 @@ browser fallbacks.
 
 The GUI API is experimental and may change. This environment has the OpenCode
 CLI but not Desktop, so the real Electron window path is not run here. The
-built bundle is exercised with mocked Electron/host modules: main-process cold
-start, embed creation, idempotent ensure, and the `/whiteboard` toggle command
-all run against the real bundle and a real canvas process. The install
-verification loads the package through the real OpenCode server and confirms
+built bundle is evaluated with the host's actual CommonJS loader contract
+(`new Function("require", "module", "exports", code)`, which provides no
+`__dirname` or `import.meta.url`) and inert window/main placeholders:
+main-process cold start, embed creation, idempotent ensure, and the
+`/whiteboard` toggle command all run against the real bundle and a real canvas
+process. The install verification loads the package through the real OpenCode
+server and confirms
 the installed GUI bundle, auto-registered MCP connection, 26-tool surface, and
 embedded skill.
 
@@ -310,7 +326,7 @@ Startup is single-flight: one promise in the process plus an exclusive
 `board.lock` across processes, with the health check repeated after the lock is
 taken. A crashed lock owner is detected by pid and cleaned up; a live owner is
 waited for, never killed. Multi-board selection is intentionally out of scope
-for v0.2.
+for v0.2.x.
 
 Commands:
 
@@ -396,8 +412,9 @@ What it actually runs (29 checks at the time of writing):
 22. startup succeeds on retry after the conflict clears;
 23. MCP reuses the shared backend and durable store instead of spawning again;
 24. stop is identity-checked and leaves the port free;
-25. the built Desktop bundle's main process cold-starts and creates an embed
-    (mocked Electron);
+25. the built Desktop bundle loads under the official CommonJS loader bindings
+    (`new Function`, no `__dirname`) and its main process cold-starts and
+    creates an embed (placeholder Electron);
 26. a second ensure reuses that backend;
 27. the built bundle registers exactly one composer slash command, `/whiteboard`,
     tied to the panel toggle; repeated toggling calls the documented
@@ -429,17 +446,24 @@ starts a private `opencode serve`, and verifies:
 - an MCP tool call cold-starts the canvas and writes durable state to the
   user-level store outside the package cache;
 - the installed `dist/gui-experimental.cjs` contains the Desktop
-  cold-start/toggle wiring and host-module externals.
+  cold-start/toggle wiring and host-module externals, with no `__dirname` or
+  `__filename`;
+- the installed server answers the Desktop path-handoff RPC with the package
+  cache root and the active whiteboard config;
+- the documented pinned upgrade sequence (`plugin remove` old reference, then
+  `plugin add` new reference) leaves one configured entry and preserves the
+  user-level board store.
 
 The test does not use the real OpenCode config, credentials, or port 4317. It
 is not part of `npm test` because it needs Git and starts a second OpenCode
 server; run it before publishing a tag.
 
-The Desktop bundle checks use mocked Electron and host modules because Desktop is
-not installed here; they run the real built bundle, the real Ipc code, and a real
-canvas process. The Git install test uses the real OpenCode server and package
-cache but still cannot exercise the real Electron `WebContentsView`/window
-runtime. That remains the one unverified layer.
+The Desktop bundle checks use the host's real loader bindings and a placeholder
+Electron because Desktop is not installed here; they run the real built bundle,
+the real Ipc code, and a real canvas process. A static check rejects
+`__dirname` and `__filename` in the bundle. The Git install test uses the real
+OpenCode server and package cache but still cannot exercise the real Electron
+`WebContentsView`/window runtime. That remains the one unverified layer.
 
 ## Security and supply chain
 
@@ -499,9 +523,9 @@ test configs.
 ## Known limitations
 
 - The real Desktop GUI runtime is unverified here; the API is experimental. The
-  bundle's main/setup code is tested with mocked Electron/host modules, not a
-  real Desktop window. Composer slash commands are documented by the V2 GUI
-  `Command.slash` API and present in the pinned SDK types; the actual Desktop
+  bundle's main/setup code is tested under the host loader contract and mocked
+  Electron, not a real Desktop window. Composer slash commands are documented
+  by the V2 GUI `Command.slash` API and present in the pinned SDK types; the actual Desktop
   composer runtime is not available here, so the tests verify the `/whiteboard`
   registration and its toggle behavior rather than rendering the composer.
 - Desktop loads GUI parts from the global plugin entry that

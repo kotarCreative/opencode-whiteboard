@@ -140,10 +140,10 @@ async function main() {
     ["-c", "user.email=verify@example.invalid", "-c", "user.name=Whiteboard Verify", "commit", "-qm", "install snapshot"],
     snapshot,
   )
-  git(["tag", "v0.2.0"], snapshot)
+  git(["tag", "v0.2.1"], snapshot)
   git(["clone", "--bare", snapshot, remote], base)
-  const commit = run("git", ["-C", remote, "rev-parse", "v0.2.0"], { cwd: base }).stdout.trim()
-  ok("clean Git remote", `${remote}#v0.2.0 @ ${commit.slice(0, 12)}`)
+  const commit = run("git", ["-C", remote, "rev-parse", "v0.2.1"], { cwd: base }).stdout.trim()
+  ok("clean Git remote", `${remote}#v0.2.1 @ ${commit.slice(0, 12)}`)
 
   await mkdir(workspace, { recursive: true })
   await writeFile(join(workspace, "README.md"), "# isolated OpenCode workspace\n")
@@ -164,7 +164,7 @@ async function main() {
   )
 
   // --- Real one-reference install ------------------------------------------
-  const spec = `git+file://${remote}#v0.2.0`
+  const spec = `git+file://${remote}#v0.2.1`
   const added = run("opencode", ["plugin", "add", spec], { timeout: 240_000 })
   if (!/installed and added/.test(added.stdout + added.stderr)) {
     fail("opencode plugin add", (added.stdout + added.stderr).slice(-800))
@@ -275,7 +275,7 @@ export default Plugin.define({
     )
     installedPackage = cachePackage
     const packageJson = JSON.parse(await readFile(join(cachePackage, "package.json"), "utf8"))
-    if (packageJson.version !== "0.2.0") fail("installed package version", packageJson.version)
+    if (packageJson.version !== "0.2.1") fail("installed package version", packageJson.version)
     if (packageJson.exports?.["."] !== "./src/index.ts") {
       fail("installed package server export", JSON.stringify(packageJson.exports))
     }
@@ -290,8 +290,12 @@ export default Plugin.define({
       'require("solid-js")',
       "ELECTRON_RUN_AS_NODE",
       "toggle-board-panel",
+      "opencode-whiteboard",
     ]) {
       if (!bundle.includes(required)) fail("installed GUI bundle", `missing ${required}`)
+    }
+    for (const token of ["__dirname", "__filename"]) {
+      if (bundle.includes(token)) fail("installed GUI bundle", `references ${token}`)
     }
     for (const required of [
       join(cachePackage, "src", "index.ts"),
@@ -303,6 +307,21 @@ export default Plugin.define({
     const mcpEntry = join(dirname(cachePackage), "mcp-excalidraw-server", "dist", "index.js")
     if (!existsSync(mcpEntry)) fail("installed dependencies", `missing ${mcpEntry}`)
     ok("package cache contents", `${packageJson.name}@${packageJson.version}, GUI + MCP + skill`)
+
+    // Desktop's main process asks the ESM server part for its package root;
+    // the bundle itself has no __dirname/import.meta.url. Exercise the real
+    // RPC over the private server, against the installed cache path.
+    const rpcPaths = api("/api/rpc/opencode-whiteboard/paths", {
+      method: "post",
+      args: ["--data", '{"input":{}}'],
+    })
+    if (rpcPaths.error || rpcPaths.output?.root !== cachePackage) {
+      fail("installed Desktop path handoff RPC", JSON.stringify(rpcPaths))
+    }
+    if (rpcPaths.output?.configPath !== boardConfig) {
+      fail("installed Desktop config handoff", JSON.stringify(rpcPaths.output))
+    }
+    ok("installed Desktop path handoff RPC", `${rpcPaths.output.root} -> ${rpcPaths.output.configPath}`)
 
     const skills = await waitFor(
       "embedded whiteboard skill",
@@ -352,6 +371,29 @@ export default Plugin.define({
       fail("MCP remains connected", JSON.stringify(status))
     }
     ok("installed package exports/commands", "server entry, GUI bundle, and MCP entry resolved from cache")
+
+    // Pinned tags are exact references: the documented upgrade is remove the
+    // old reference, then add the new one. Prove that syntax with the real CLI
+    // and that the user-level board store survives it.
+    const sentinel = join(boardHome, "data", "upgrade-preserved.json")
+    await writeFile(sentinel, JSON.stringify({ preserved: true }) + "\n")
+    const removed = run("opencode", ["plugin", "remove", spec])
+    if (!/removed from/.test(removed.stdout + removed.stderr)) {
+      fail("opencode plugin remove", (removed.stdout + removed.stderr).slice(-800))
+    }
+    const afterRemove = JSON.parse(await readFile(join(configDir, "opencode", "opencode.json"), "utf8"))
+    if ((afterRemove.plugins ?? []).includes(spec)) {
+      fail("opencode plugin remove", JSON.stringify(afterRemove.plugins))
+    }
+    const readded = run("opencode", ["plugin", "add", spec], { timeout: 240_000 })
+    if (!/installed and added/.test(readded.stdout + readded.stderr)) {
+      fail("opencode plugin add after remove", (readded.stdout + readded.stderr).slice(-800))
+    }
+    const afterAdd = JSON.parse(await readFile(join(configDir, "opencode", "opencode.json"), "utf8"))
+    const entries = (afterAdd.plugins ?? []).filter((entry) => entry === spec)
+    if (entries.length !== 1) fail("single pinned plugin entry", JSON.stringify(afterAdd.plugins))
+    if (!existsSync(sentinel)) fail("upgrade preserves board data", "user-level sentinel disappeared")
+    ok("remove/add upgrade syntax", "one pinned entry; user-level board data preserved")
 
     console.log(`\n${checks.filter((check) => check.status === "pass").length} passed, 0 failed`)
   } finally {

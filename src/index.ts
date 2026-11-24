@@ -8,6 +8,7 @@ import {
   resolveNodeCommand,
   UPLOAD_TOOL,
 } from "../bin/lib/backend.mjs"
+import { WhiteboardPaths } from "./rpc"
 
 // The server part runs from either a checkout (src/index.ts) or a package
 // installed by `opencode plugin add`. Both resolve the package root the same
@@ -26,7 +27,7 @@ function messageOf(error: unknown) {
 /**
  * One-reference install:
  *
- *   opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.0
+ *   opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.1
  *
  * The server part registers the canvas MCP server itself, so the user does not
  * hand-edit `mcp.servers`. It also hides upstream's upload-to-excalidraw.com
@@ -49,6 +50,13 @@ export default Plugin.define({
       console.error(`[opencode-whiteboard] configuration failed: ${messageOf(error)}`)
       throw error
     }
+
+    // The Desktop GUI bundle is CommonJS evaluated without __dirname or
+    // import.meta.url. This ESM half owns that path resolution and hands the
+    // result to the main process through the official plugin RPC bridge.
+    await ctx.rpc.register(WhiteboardPaths, {
+      paths: async () => ({ root: projectRoot, configPath: board.configPath }),
+    })
 
     if (ctx.options.mcp !== false) {
       const command = [resolveNodeCommand(process.env), board.mcpEntry]
