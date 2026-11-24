@@ -73,6 +73,11 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
     if (session) await run(session)
   }
 
+  const openBoardExternally = async () => {
+    const target = await ensureBackend()
+    if (target) void ctx.system.openExternal(target)
+  }
+
   const openBoard = withSession(async (session) => {
     const target = await ensureBackend()
     if (target) openBrowserPane(session, target)
@@ -85,9 +90,15 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
   // One command for the palette, shortcut settings, and the composer's
   // `/whiteboard` menu. The host's documented toggle opens the panel if it is
   // closed and closes it if it is open; no prompt or model call is involved.
-  const togglePanel = withSession((session) => {
+  //
+  // A fresh draft has no SessionRef, and every Layout call needs one, so the
+  // side panel cannot open before the first message. Keep the slash command
+  // usable there by opening the board in the system browser instead.
+  const togglePanel = () => {
+    const session = ctx.sessions.current()
+    if (!session) return openBoardExternally()
     ctx.layout.toggle(panelKey, session)
-  })
+  }
 
   ctx.add(Command, (): Command => ({
     id: "open-board",
@@ -99,16 +110,21 @@ export const setup: Plugin.Setup<typeof definition> = (ctx) => {
     run: openBoard,
   }))
 
-  ctx.add(Command, (): Command => ({
-    id: "toggle-board-panel",
-    title: ctx.t("command.toggle"),
-    description: ctx.t("command.toggle.description"),
-    keywords: "whiteboard excalidraw canvas panel toggle open close",
-    section: "session",
-    slash: { name: "whiteboard" },
-    enabled: !!ctx.sessions.current(),
-    run: togglePanel,
-  }))
+  ctx.add(Command, (): Command => {
+    const session = ctx.sessions.current()
+
+    return {
+      id: "toggle-board-panel",
+      title: session ? ctx.t("command.toggle") : ctx.t("command.openDraft"),
+      description: session ? ctx.t("command.toggle.description") : ctx.t("command.openDraft.description"),
+      keywords: "whiteboard excalidraw canvas panel toggle open close",
+      section: "session",
+      slash: { name: "whiteboard" },
+      // No session gate: a fresh draft must still list /whiteboard. There the
+      // run opens the board externally, because Layout has no draft layout.
+      run: togglePanel,
+    }
+  })
 
   ctx.add(MenuItem, (): MenuItem => {
     const session = ctx.sessions.current()

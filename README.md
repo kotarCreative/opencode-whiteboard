@@ -4,7 +4,7 @@ A local-first whiteboard for OpenCode: a pinned Excalidraw canvas, an
 auto-registered MCP bridge, and an experimental OpenCode Desktop panel. Nothing
 is sent to a hosted service, and no global OpenCode configuration is hand-edited.
 
-> **Status: v0.2.2 one-reference install.** Install with a single
+> **Status: v0.2.3 one-reference install.** Install with a single
 > `opencode plugin add` Git reference. The server plugin registers the
 > `whiteboard` MCP server itself, removes upstream's upload-to-excalidraw.com
 > tool from the model surface, and contributes the pull-only skill. The built
@@ -14,17 +14,20 @@ is sent to a hosted service, and no global OpenCode configuration is hand-edited
 > plugin, not one board per project. Its durable state lives outside the package
 > cache (see [Board identity and scope](#board-identity-and-scope)). The Desktop
 > panel is implemented against the documented experimental GUI plugin API and
-> tested with the host's actual CommonJS loader contract. v0.2.2 fixes the blank
-> Desktop panel in v0.2.1: the embedded view had no sizing class, measured 0px,
-> and Electron never placed the canvas. The panel now sizes the view to its full
-> box and renders the canvas toolbar. That fix was checked in a real OpenCode
-> Desktop **2.4.1** session at a wide and a narrow panel width; other Desktop
-> builds and the rest of the panel's interaction surface were not exercised
-> there. v0.2.1 fixed the Desktop-only `__dirname is not defined` startup crash
-> by resolving the package root in the ESM server part and handing it to the
-> main process over the documented plugin RPC bridge. The browser/MCP path is
-> tested end to end, including a clean Git install in an isolated OpenCode
-> server.
+> tested with the host's actual CommonJS loader contract. v0.2.3 brings
+> **`/whiteboard`** back to a fresh draft composer, before the first message.
+> Previously the command was hidden there because the side panel needs an active
+> session. In a draft the command now opens the same local board in the system
+> browser; once a session exists it keeps opening and closing the panel. That
+> behavior is covered by the mocked-host suite, not by driving a real draft in
+> Desktop. The panel itself still relies on the v0.2.2 sizing fix, checked
+> manually in OpenCode Desktop **2.4.1** at a wide and a narrow panel width;
+> other Desktop builds and the rest of the panel's interaction surface were not
+> exercised there. v0.2.1 fixed the Desktop-only `__dirname is not defined`
+> startup crash by resolving the package root in the ESM server part and handing
+> it to the main process over the documented plugin RPC bridge. The browser/MCP
+> path is tested end to end, including a clean Git install in an isolated
+> OpenCode server.
 
 ## Why this shape
 
@@ -69,7 +72,7 @@ Requirements:
 Install the pinned release:
 
 ```sh
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.3'
 ```
 
 Then **restart OpenCode Desktop** (quit and reopen it) so the global plugin
@@ -80,8 +83,10 @@ Open any project and use it:
 
 - **Desktop:** press `/whiteboard` in the composer, run **Whiteboard: Toggle
   board panel** from the command palette, or choose **Whiteboard** from the
-  session side-panel **+** menu. The browser-pane command and a fallback to
-  <http://127.0.0.1:4317> are also available.
+  session side-panel **+** menu. Before the first message, `/whiteboard` opens
+  the board in the system browser because the side panel needs an active
+  session; after that it toggles the panel. The browser-pane command and a
+  fallback to <http://127.0.0.1:4317> are also available.
 - **TUI:** there is no Desktop side panel and the `/whiteboard` GUI command does
   not apply. The MCP server and skill still work: `/mcps` (or
   `opencode mcp list`) should show **`whiteboard connected`**, and the model can
@@ -101,7 +106,8 @@ server.
 > loader bindings. The build environment does not include Desktop, so the
 > automated suite cannot drive the Electron window. The v0.2.2 panel fix was
 > checked manually in OpenCode Desktop **2.4.1** at a wide and a narrow panel
-> width, where the canvas toolbar rendered; no wider GUI claim is made. If a
+> width, where the canvas toolbar rendered; v0.2.3's draft `/whiteboard` path is
+> covered only by the mocked host. No wider GUI claim is made. If a
 > particular Desktop build does not show the panel, use **Whiteboard: Open
 > board** (browser pane) or open <http://127.0.0.1:4317> directly; the board
 > and MCP still work.
@@ -118,14 +124,14 @@ registers the `whiteboard` MCP server at startup, so there is no second install
 step. `opencode plugin list` shows the installed package; `opencode mcp list`
 shows the connection.
 
-The pinned tag is deliberate: `v0.2.2` is reproducible. `opencode plugin check`
+The pinned tag is deliberate: `v0.2.3` is reproducible. `opencode plugin check`
 reports updates, while `opencode plugin update` only updates unpinned Git
 references. Exact tags are pinned, so upgrade a pinned install by removing the
 old reference and adding the new one:
 
 ```sh
-opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.1'
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.2'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.3'
 ```
 
 `plugin add` matches the configured reference exactly, so remove the old tag
@@ -170,10 +176,14 @@ With OpenCode Desktop, the plugin contributes:
   closed and closes it when it is open, using the documented
   `ctx.layout.toggle` panel API. The same command is **`/whiteboard`** in the
   composer's slash menu. It runs only that layout action: it does not insert a
-  chat prompt and does not call a model. Closing keeps the backend running so
-  the board and MCP stay available. Reopen with `/whiteboard`, the palette, the
-  **+** menu, or Desktop's recently-closed-tab restore. Opening the panel asks
-  the Electron main process to ensure the backend, creating it on demand if
+  chat prompt and does not call a model. In a fresh draft, before the first
+  message, there is no session for the panel API, so `/whiteboard` instead
+  ensures the backend and opens the board in the system browser; the palette
+  entry is labelled **Whiteboard: Open board** there. Closing keeps the backend
+  running so the board and MCP stay available. Reopen with `/whiteboard`, the
+  palette, the **+** menu, or Desktop's recently-closed-tab restore. Opening the
+  panel asks the Electron main process to ensure the backend, creating it on
+  demand if
   needed. The main process uses one shared single-flight startup, rejects a port
   owned by a different service, creates one isolated `WebContentsView` per
   window, denies popups and off-origin navigation, and returns the embed id. If
@@ -195,7 +205,8 @@ The built bundle is evaluated with the host's actual CommonJS loader contract
 `__dirname` or `import.meta.url`) and inert window/main placeholders:
 main-process cold start, embed creation, idempotent ensure, and the
 `/whiteboard` toggle command all run against the real bundle and a real canvas
-process. A headless Chromium regression test renders the real panel and checks
+process, including the fresh-draft path where no session exists. A headless
+Chromium regression test renders the real panel and checks
 that its embed view fills the panel at 640px and 390px widths. The v0.2.2 fix was
 also checked manually in OpenCode Desktop **2.4.1** at a wide and a narrow panel
 width, where the canvas toolbar rendered. That manual check covers the panel's

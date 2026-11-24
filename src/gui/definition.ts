@@ -15,6 +15,9 @@ export const definition = Plugin.define({
       "command.open": "Whiteboard: Open board",
       "command.toggle": "Whiteboard: Toggle board panel",
       "command.toggle.description": "Open the whiteboard panel, or close it if it is open",
+      "command.openDraft": "Whiteboard: Open board",
+      "command.openDraft.description":
+        "Open the shared local board in your browser. The side panel is available once a session starts.",
       "menu.open": "Whiteboard",
       "menu.description": "Shared local board",
     },

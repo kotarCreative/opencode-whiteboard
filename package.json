@@ -1,6 +1,6 @@
 {
   "name": "opencode-whiteboard",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Local-first shared whiteboard for OpenCode: auto-registered MCP canvas, pinned Excalidraw GUI, and an experimental Desktop panel.",
   "license": "MIT",
   "type": "module",

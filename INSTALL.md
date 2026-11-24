@@ -1,20 +1,25 @@
-# Install OpenCode Whiteboard v0.2.2
+# Install OpenCode Whiteboard v0.2.3
 
-v0.2.2 is a one-reference Git install. The package ships its prebuilt Desktop GUI
+v0.2.3 is a one-reference Git install. The package ships its prebuilt Desktop GUI
 bundle, auto-registers the MCP server, and keeps board state outside the package
 cache. No local MCP entry, GUI build, or global JSON edit is required.
 
-v0.2.2 fixes the blank Desktop panel in v0.2.1: the embedded view had no sizing
-class, measured 0px, and Electron never placed the canvas. The fix was checked
-in a real OpenCode Desktop **2.4.1** session at a wide and a narrow panel width,
-where the canvas toolbar rendered. Other Desktop builds and the rest of the
-canvas interaction surface were not exercised there.
+v0.2.3 keeps `/whiteboard` available in a fresh desktop draft, before the first
+message. The side panel requires an active session, so in a draft the command
+opens the board in the system browser instead; in a session it still toggles the
+panel. That draft behavior is covered by the mocked-host test suite, not by
+driving a real draft in Desktop. The panel itself still relies on the v0.2.2
+sizing fix: the embedded view had no sizing class, measured 0px, and Electron
+never placed the canvas. That fix was checked in a real OpenCode Desktop
+**2.4.1** session at a wide and a narrow panel width, where the canvas toolbar
+rendered. Other Desktop builds and the rest of the canvas interaction surface
+were not exercised there.
 
 The release is published in the public
 [`kotarCreative/opencode-whiteboard`](https://github.com/kotarCreative/opencode-whiteboard)
 repository. Installing it does **not** require a GitHub account, `gh` login, SSH
 key, or npm login, and it is not published to npm. The install uses the public
-**v0.2.2** tag.
+**v0.2.3** tag.
 
 ## Requirements
 
@@ -30,7 +35,7 @@ key, or npm login, and it is not published to npm. The install uses the public
 ## 1. Install one reference
 
 ```sh
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.3'
 ```
 
 The command installs the package into OpenCode's plugin cache and adds it to the
@@ -45,7 +50,7 @@ run `opencode service restart` if the plugin does not appear.
 If you prefer SSH, the equivalent pinned reference is:
 
 ```sh
-opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.2'
+opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.3'
 ```
 
 > **Public repository:** the default HTTPS install reads the public tag
@@ -53,7 +58,7 @@ opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.
 > network/proxy access first:
 >
 > ```sh
-> git ls-remote https://github.com/kotarCreative/opencode-whiteboard.git v0.2.2
+> git ls-remote https://github.com/kotarCreative/opencode-whiteboard.git v0.2.3
 > ```
 >
 > Do not put a token in the plugin spec. No GitHub authentication is needed for
@@ -94,7 +99,9 @@ If OpenCode reports a plugin load error, check its server log path from
 so there is no separate Desktop install. **Restart Desktop after installing**,
 then use **`/whiteboard`** in the composer, **Whiteboard: Toggle board panel**
 from the command palette, or the **Whiteboard** launcher in the session
-side-panel **+** menu.
+side-panel **+** menu. In a fresh draft, before the first message, `/whiteboard`
+opens the board in the system browser because the side panel needs an active
+session; after the session starts it toggles the panel.
 
 The TUI has no Desktop side panel, and the `/whiteboard` GUI command does not
 apply there. The MCP server and skill still work: use `/mcps` or
@@ -104,7 +111,8 @@ apply there. The MCP server and skill still work: use `/mcps` or
 The desktop panel is experimental. The build environment does not include
 Desktop, so the automated suite cannot drive the Electron window; the v0.2.2
 panel fix was checked manually in OpenCode Desktop **2.4.1** at a wide and a
-narrow width, where the canvas toolbar rendered. See the caveats below. If a
+narrow width, where the canvas toolbar rendered. v0.2.3's fresh-draft
+`/whiteboard` path is covered only by the mocked host. See the caveats below. If a
 particular Desktop build does not load the GUI, use **Whiteboard: Open board**
 (browser pane) or open <http://127.0.0.1:4317> directly. The canvas and MCP
 still work.
@@ -152,8 +160,8 @@ branches and ranges, but skips exact tags, so upgrade a pinned install by
 removing the old reference and adding the new one:
 
 ```sh
-opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.1'
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.2'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.3'
 ```
 
 Remove the old reference first. `opencode plugin add` compares the full
@@ -170,7 +178,7 @@ outside the package cache and is preserved across remove/add and updates; see
 Remove with the same configured reference:
 
 ```sh
-opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.2'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.3'
 ```
 
 Board data under the user data root is not removed automatically. Delete that
@@ -209,7 +217,9 @@ prerelease process.
   real isolated OpenCode server. The panel layout and toolbar were also checked
   manually in OpenCode Desktop **2.4.1** at wide and narrow widths. That manual
   check does not cover other Desktop builds or full canvas interaction. v0.2.2
-  fixes the blank panel caused by a 0px embed view. v0.2.1 fixes the
+  fixed the blank panel caused by a 0px embed view. v0.2.3 keeps `/whiteboard`
+  in a fresh draft, where it opens the system browser; that path is tested only
+  against the mocked host. v0.2.1 fixed the
   Desktop-only `__dirname is not defined` startup crash: OpenCode supplies
   `require`, `module`, and `exports` but no Node path globals or
   `import.meta.url`.

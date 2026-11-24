@@ -269,7 +269,7 @@ async function run() {
   }
   ok("upstream package checked", "no preinstall/postinstall hook")
 
-  if (pkg.version !== "0.2.2") fail("package version", pkg.version)
+  if (pkg.version !== "0.2.3") fail("package version", pkg.version)
   if (pkg.exports?.["./gui-experimental"] !== "./dist/gui-experimental.cjs") {
     fail("package exports", JSON.stringify(pkg.exports))
   }
@@ -584,7 +584,7 @@ async function run() {
       const init = await client.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify", version: "0.2.2" },
+        clientInfo: { name: "opencode-whiteboard-verify", version: "0.2.3" },
       })
       if (!init?.serverInfo?.name) fail("MCP initialize", JSON.stringify(init))
       client.notify("notifications/initialized")
@@ -730,7 +730,7 @@ async function run() {
     const init = await autoClient.request("initialize", {
       protocolVersion: "2025-11-25",
       capabilities: {},
-      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.2.2" },
+      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.2.3" },
     })
     if (!init?.serverInfo?.name) fail("MCP auto-start initialize", JSON.stringify(init))
     autoClient.notify("notifications/initialized")
@@ -867,7 +867,7 @@ async function run() {
       const init = await sharedClient.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.2.2" },
+        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.2.3" },
       })
       if (!init?.serverInfo?.name) fail("MCP reuses shared backend", JSON.stringify(init))
       sharedClient.notify("notifications/initialized")
@@ -1140,6 +1140,52 @@ async function run() {
     }
     if (!registrations.get("panel")) fail("panel registered", "Panel contribution missing")
 
+    // A fresh draft has no mounted session, so `sessions.current()` is
+    // undefined. Regression: `/whiteboard` must still be listed there and do
+    // something useful. The panel is session-scoped, so the draft run opens the
+    // board externally instead of calling a Layout API without a SessionRef.
+    const draftRegistrations = new Map()
+    const draftSetupCtx = {
+      ...setupCtx,
+      sessions: { current: () => undefined },
+      add: (token, item) => {
+        const value = typeof item === "function" ? item() : item
+        if (token === tokens.Command) draftRegistrations.set(`command:${value.id}`, value)
+        if (token === tokens.MenuItem) draftRegistrations.set("menu", value)
+        if (token === tokens.Panel) draftRegistrations.set("panel", value)
+        return () => {}
+      },
+    }
+    definition.setup(draftSetupCtx)
+    const draftCommands = [...draftRegistrations.entries()]
+      .filter(([key]) => key.startsWith("command:"))
+      .map(([, value]) => value)
+    const draftSlashes = draftCommands.filter((command) => command.slash && command.enabled !== false)
+    if (draftSlashes.length !== 1 || draftSlashes[0].slash.name !== "whiteboard") {
+      fail(
+        "fresh draft composer slash command",
+        `expected /whiteboard with no session, got ${JSON.stringify(draftSlashes.map((command) => command.slash))}`,
+      )
+    }
+    const draftToggle = draftRegistrations.get("command:toggle-board-panel")
+    if (!draftToggle || draftToggle.enabled === false) {
+      fail("fresh draft composer slash command", "/whiteboard is disabled before the first message")
+    }
+    const externalBeforeDraft = desktop.openExternal.length
+    desktop.layout.length = 0
+    await draftToggle.run()
+    if (!desktop.openExternal.slice(externalBeforeDraft).includes(first.url)) {
+      fail("fresh draft /whiteboard", `system browser did not receive ${first.url}`)
+    }
+    if (desktop.layout.length) {
+      fail("fresh draft /whiteboard", "called a Layout API without a SessionRef")
+    }
+    ok(
+      "fresh draft /whiteboard",
+      "listed before the first message; opens the board externally while the panel stays session-scoped",
+    )
+
+    desktop.openExternal.length = 0
     await registrations.get("command:open-board").run()
     if (!desktop.openExternal.includes(first.url)) {
       fail("open board cold-start command", `system browser did not receive ${first.url}`)
