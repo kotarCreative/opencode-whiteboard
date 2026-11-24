@@ -103,7 +103,16 @@ export function BoardView(props: {
       >
         {(ready) => (
           <div style="flex:1;min-height:0;position:relative">
-            <props.ctx.embeds.View id={ready().id} visible radius={8} page={props.boardUrl} />
+            {/* The native view is laid out over this box. The host's View renders a plain div,
+                so it must be given the box's full size; with the default auto height the view
+                measures 0px and Electron never places the canvas (blank panel, no tools). */}
+            <props.ctx.embeds.View
+              id={ready().id}
+              visible
+              radius={8}
+              page={props.boardUrl}
+              class="absolute inset-0"
+            />
           </div>
         )}
       </Show>

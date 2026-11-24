@@ -4,7 +4,7 @@ A local-first whiteboard for OpenCode: a pinned Excalidraw canvas, an
 auto-registered MCP bridge, and an experimental OpenCode Desktop panel. Nothing
 is sent to a hosted service, and no global OpenCode configuration is hand-edited.
 
-> **Status: v0.2.1 one-reference install.** Install with a single
+> **Status: v0.2.2 one-reference install.** Install with a single
 > `opencode plugin add` Git reference. The server plugin registers the
 > `whiteboard` MCP server itself, removes upstream's upload-to-excalidraw.com
 > tool from the model surface, and contributes the pull-only skill. The built
@@ -14,12 +14,17 @@ is sent to a hosted service, and no global OpenCode configuration is hand-edited
 > plugin, not one board per project. Its durable state lives outside the package
 > cache (see [Board identity and scope](#board-identity-and-scope)). The Desktop
 > panel is implemented against the documented experimental GUI plugin API and
-> tested with the host's actual CommonJS loader contract; the **real Electron
-> window runtime is not available in this environment**. v0.2.1 fixes the
-> Desktop-only `__dirname is not defined` startup crash by resolving the
-> package root in the ESM server part and handing it to the main process over
-> the documented plugin RPC bridge. The browser/MCP path is tested end to end,
-> including a clean Git install in an isolated OpenCode server.
+> tested with the host's actual CommonJS loader contract. v0.2.2 fixes the blank
+> Desktop panel in v0.2.1: the embedded view had no sizing class, measured 0px,
+> and Electron never placed the canvas. The panel now sizes the view to its full
+> box and renders the canvas toolbar. That fix was checked in a real OpenCode
+> Desktop **2.4.1** session at a wide and a narrow panel width; other Desktop
+> builds and the rest of the panel's interaction surface were not exercised
+> there. v0.2.1 fixed the Desktop-only `__dirname is not defined` startup crash
+> by resolving the package root in the ESM server part and handing it to the
+> main process over the documented plugin RPC bridge. The browser/MCP path is
+> tested end to end, including a clean Git install in an isolated OpenCode
+> server.
 
 ## Why this shape
 
@@ -64,7 +69,7 @@ Requirements:
 Install the pinned release:
 
 ```sh
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
 ```
 
 Then **restart OpenCode Desktop** (quit and reopen it) so the global plugin
@@ -93,11 +98,13 @@ server.
 
 > **Desktop status:** the panel is implemented against the documented
 > experimental GUI plugin API and tested under the host's actual CommonJS
-> loader bindings. The real Electron window runtime has not been available in
-> this environment. If a
-> particular Desktop build does not show it, use **Whiteboard: Open board**
-> (browser pane) or open <http://127.0.0.1:4317> directly; the board and MCP
-> still work.
+> loader bindings. The build environment does not include Desktop, so the
+> automated suite cannot drive the Electron window. The v0.2.2 panel fix was
+> checked manually in OpenCode Desktop **2.4.1** at a wide and a narrow panel
+> width, where the canvas toolbar rendered; no wider GUI claim is made. If a
+> particular Desktop build does not show the panel, use **Whiteboard: Open
+> board** (browser pane) or open <http://127.0.0.1:4317> directly; the board
+> and MCP still work.
 
 See [INSTALL.md](INSTALL.md) for verification steps, update/remove commands, and
 the older portable archive path. The v0.1 archive assets remain as published and
@@ -111,14 +118,14 @@ registers the `whiteboard` MCP server at startup, so there is no second install
 step. `opencode plugin list` shows the installed package; `opencode mcp list`
 shows the connection.
 
-The pinned tag is deliberate: `v0.2.1` is reproducible. `opencode plugin check`
+The pinned tag is deliberate: `v0.2.2` is reproducible. `opencode plugin check`
 reports updates, while `opencode plugin update` only updates unpinned Git
 references. Exact tags are pinned, so upgrade a pinned install by removing the
 old reference and adding the new one:
 
 ```sh
-opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.0'
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
 ```
 
 `plugin add` matches the configured reference exactly, so remove the old tag
@@ -181,15 +188,19 @@ The redundant open-panel and close-panel palette commands were removed; the
 toggle covers both. The panel's error card keeps its browser-pane and system
 browser fallbacks.
 
-The GUI API is experimental and may change. This environment has the OpenCode
-CLI but not Desktop, so the real Electron window path is not run here. The
-built bundle is evaluated with the host's actual CommonJS loader contract
+The GUI API is experimental and may change. The automated environment has the
+OpenCode CLI but not Desktop, so it does not drive the real Electron window.
+The built bundle is evaluated with the host's actual CommonJS loader contract
 (`new Function("require", "module", "exports", code)`, which provides no
 `__dirname` or `import.meta.url`) and inert window/main placeholders:
 main-process cold start, embed creation, idempotent ensure, and the
 `/whiteboard` toggle command all run against the real bundle and a real canvas
-process. The install verification loads the package through the real OpenCode
-server and confirms
+process. A headless Chromium regression test renders the real panel and checks
+that its embed view fills the panel at 640px and 390px widths. The v0.2.2 fix was
+also checked manually in OpenCode Desktop **2.4.1** at a wide and a narrow panel
+width, where the canvas toolbar rendered. That manual check covers the panel's
+size and toolbar, not every canvas tool or Desktop build. The install
+verification loads the package through the real OpenCode server and confirms
 the installed GUI bundle, auto-registered MCP connection, 26-tool surface, and
 embedded skill.
 
@@ -380,7 +391,7 @@ Freshness limits:
 npm test
 ```
 
-What it actually runs (29 checks at the time of writing):
+What it actually runs (30 checks at the time of writing):
 
 1. dependency is pinned to `mcp-excalidraw-server@2.2.0` in `package.json` and
    `package-lock.json`;
@@ -395,33 +406,35 @@ What it actually runs (29 checks at the time of writing):
    embedded skill;
 7. the Desktop GUI bundle exists, externalizes host modules, and contains the
    cold-start, simplified panel-command, and `/whiteboard` slash wiring;
-8. a real upstream canvas starts on an isolated port with durable state;
-9. the canvas UI is served;
-10. real MCP stdio `initialize` and `tools/list` (27 raw upstream tools);
-11. MCP creates two boxes and a bound arrow;
-12. MCP pulls the scene and finds the labels;
-13. MCP renders a headless PNG screenshot;
-14. MCP exports a `.excalidraw` file with bound labels;
-15. MCP clears the test canvas;
-16. headless Chromium renders the real UI (skipped if Chromium is absent);
-17. MCP auto-starts a canvas with no manual `board` command;
-18. the shared backend cold-starts with no manual `board` command;
-19. a second start reuses the running canvas;
-20. two concurrent starts produce exactly one spawn and one pid;
-21. a foreign service on the port is rejected and left untouched;
-22. startup succeeds on retry after the conflict clears;
-23. MCP reuses the shared backend and durable store instead of spawning again;
-24. stop is identity-checked and leaves the port free;
-25. the built Desktop bundle loads under the official CommonJS loader bindings
+8. the real panel renders in headless Chromium and its embed view fills the
+   panel at 640px and 390px widths (skipped if Chromium is absent);
+9. a real upstream canvas starts on an isolated port with durable state;
+10. the canvas UI is served;
+11. real MCP stdio `initialize` and `tools/list` (27 raw upstream tools);
+12. MCP creates two boxes and a bound arrow;
+13. MCP pulls the scene and finds the labels;
+14. MCP renders a headless PNG screenshot;
+15. MCP exports a `.excalidraw` file with bound labels;
+16. MCP clears the test canvas;
+17. headless Chromium renders the real UI (skipped if Chromium is absent);
+18. MCP auto-starts a canvas with no manual `board` command;
+19. the shared backend cold-starts with no manual `board` command;
+20. a second start reuses the running canvas;
+21. two concurrent starts produce exactly one spawn and one pid;
+22. a foreign service on the port is rejected and left untouched;
+23. startup succeeds on retry after the conflict clears;
+24. MCP reuses the shared backend and durable store instead of spawning again;
+25. stop is identity-checked and leaves the port free;
+26. the built Desktop bundle loads under the official CommonJS loader bindings
     (`new Function`, no `__dirname`) and its main process cold-starts and
     creates an embed (placeholder Electron);
-26. a second ensure reuses that backend;
-27. the built bundle registers exactly one composer slash command, `/whiteboard`,
+27. a second ensure reuses that backend;
+28. the built bundle registers exactly one composer slash command, `/whiteboard`,
     tied to the panel toggle; repeated toggling calls the documented
     `Layout.toggle` API (mock), opening when closed and closing when open, with
     no prompt or model call; the browser fallback opens;
-28. an invalid config is returned to the panel as an error, with no embed;
-29. durable state survives a canvas restart.
+29. an invalid config is returned to the panel as an error, with no embed;
+30. durable state survives a canvas restart.
 
 Test state uses isolated configs/ports; production persistence uses the
 user-level board root. The default board is not touched.
@@ -459,11 +472,14 @@ is not part of `npm test` because it needs Git and starts a second OpenCode
 server; run it before publishing a tag.
 
 The Desktop bundle checks use the host's real loader bindings and a placeholder
-Electron because Desktop is not installed here; they run the real built bundle,
-the real Ipc code, and a real canvas process. A static check rejects
-`__dirname` and `__filename` in the bundle. The Git install test uses the real
-OpenCode server and package cache but still cannot exercise the real Electron
-`WebContentsView`/window runtime. That remains the one unverified layer.
+Electron because Desktop is not installed in the automated environment; they
+run the real built bundle, the real Ipc code, and a real canvas process. A
+static check rejects `__dirname` and `__filename` in the bundle, and a headless
+Chromium check renders the real panel at two widths to catch a zero-height embed.
+The Git install test uses the real OpenCode server and package cache. The panel
+layout and toolbar were additionally checked manually in OpenCode Desktop 2.4.1
+at wide and narrow widths; that manual check does not cover other Desktop builds
+or full canvas interaction.
 
 ## Security and supply chain
 
@@ -510,6 +526,8 @@ opencode-whiteboard/
 │       └── board.tsx           panel UI + fallback card
 ├── dist/gui-experimental.cjs   tracked prebuilt Desktop bundle
 ├── scripts/verify.mjs          end-to-end canvas/MCP/GUI-bundle checks
+├── scripts/verify-embed-layout.mjs  headless panel embed-size regression
+├── scripts/embed-layout/       fixture used by the embed-size check
 ├── scripts/verify-install.mjs  clean Git remote + OpenCode install test
 ├── .opencode/skills/whiteboard/SKILL.md
 ├── LICENSE                     MIT

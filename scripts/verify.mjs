@@ -269,7 +269,7 @@ async function run() {
   }
   ok("upstream package checked", "no preinstall/postinstall hook")
 
-  if (pkg.version !== "0.2.1") fail("package version", pkg.version)
+  if (pkg.version !== "0.2.2") fail("package version", pkg.version)
   if (pkg.exports?.["./gui-experimental"] !== "./dist/gui-experimental.cjs") {
     fail("package exports", JSON.stringify(pkg.exports))
   }
@@ -448,6 +448,11 @@ async function run() {
   for (const removed of ["open-board-panel", "close-board-panel"]) {
     if (bundle.includes(removed)) fail("GUI bundle simplified commands", `stale command ${removed}`)
   }
+  // The embed SDK renders a plain div, so the panel must size it. A classless View measures
+  // 0px and the native canvas stays unplaced (the v0.2.1 blank-panel bug).
+  if (!bundle.includes("absolute inset-0")) {
+    fail("GUI bundle embed box", "the built panel does not give ctx.embeds.View a sizing class")
+  }
 
   // Main process: the official loader bindings, real shared modules, Node
   // built-ins, and placeholders for window-only modules. Invoking `main` is
@@ -513,6 +518,13 @@ async function run() {
     `${(await stat(guiBundle)).size} bytes, loads in both Desktop processes without __dirname/__filename`,
   )
 
+  // Render the real panel in headless Chromium. The embed SDK's View is a plain div; this
+  // asserts the panel gives it the panel's full box at a normal and a narrow width.
+  const { verifyEmbedLayout } = await import("./verify-embed-layout.mjs")
+  const embedLayout = await verifyEmbedLayout()
+  if (embedLayout.status === "skip") skip("panel embed layout", embedLayout.detail)
+  else ok("panel embed layout", `fills the panel: ${embedLayout.detail}`)
+
   // --- Isolated canvas ---------------------------------------------------------
   await rm(dataDir, { recursive: true, force: true })
   await mkdir(dataDir, { recursive: true })
@@ -572,7 +584,7 @@ async function run() {
       const init = await client.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify", version: "0.2.1" },
+        clientInfo: { name: "opencode-whiteboard-verify", version: "0.2.2" },
       })
       if (!init?.serverInfo?.name) fail("MCP initialize", JSON.stringify(init))
       client.notify("notifications/initialized")
@@ -718,7 +730,7 @@ async function run() {
     const init = await autoClient.request("initialize", {
       protocolVersion: "2025-11-25",
       capabilities: {},
-      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.2.1" },
+      clientInfo: { name: "opencode-whiteboard-verify-auto", version: "0.2.2" },
     })
     if (!init?.serverInfo?.name) fail("MCP auto-start initialize", JSON.stringify(init))
     autoClient.notify("notifications/initialized")
@@ -855,7 +867,7 @@ async function run() {
       const init = await sharedClient.request("initialize", {
         protocolVersion: "2025-11-25",
         capabilities: {},
-        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.2.1" },
+        clientInfo: { name: "opencode-whiteboard-verify-shared", version: "0.2.2" },
       })
       if (!init?.serverInfo?.name) fail("MCP reuses shared backend", JSON.stringify(init))
       sharedClient.notify("notifications/initialized")

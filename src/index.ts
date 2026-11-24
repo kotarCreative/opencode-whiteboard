@@ -27,7 +27,7 @@ function messageOf(error: unknown) {
 /**
  * One-reference install:
  *
- *   opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.1
+ *   opencode plugin add github:kotarCreative/opencode-whiteboard#v0.2.2
  *
  * The server part registers the canvas MCP server itself, so the user does not
  * hand-edit `mcp.servers`. It also hides upstream's upload-to-excalidraw.com

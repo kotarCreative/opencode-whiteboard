@@ -1,14 +1,20 @@
-# Install OpenCode Whiteboard v0.2.1
+# Install OpenCode Whiteboard v0.2.2
 
-v0.2.1 is a one-reference Git install. The package ships its prebuilt Desktop GUI
+v0.2.2 is a one-reference Git install. The package ships its prebuilt Desktop GUI
 bundle, auto-registers the MCP server, and keeps board state outside the package
 cache. No local MCP entry, GUI build, or global JSON edit is required.
+
+v0.2.2 fixes the blank Desktop panel in v0.2.1: the embedded view had no sizing
+class, measured 0px, and Electron never placed the canvas. The fix was checked
+in a real OpenCode Desktop **2.4.1** session at a wide and a narrow panel width,
+where the canvas toolbar rendered. Other Desktop builds and the rest of the
+canvas interaction surface were not exercised there.
 
 The release is published in the public
 [`kotarCreative/opencode-whiteboard`](https://github.com/kotarCreative/opencode-whiteboard)
 repository. Installing it does **not** require a GitHub account, `gh` login, SSH
 key, or npm login, and it is not published to npm. The install uses the public
-**v0.2.1** tag.
+**v0.2.2** tag.
 
 ## Requirements
 
@@ -24,7 +30,7 @@ key, or npm login, and it is not published to npm. The install uses the public
 ## 1. Install one reference
 
 ```sh
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
 ```
 
 The command installs the package into OpenCode's plugin cache and adds it to the
@@ -39,7 +45,7 @@ run `opencode service restart` if the plugin does not appear.
 If you prefer SSH, the equivalent pinned reference is:
 
 ```sh
-opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.1'
+opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.git#v0.2.2'
 ```
 
 > **Public repository:** the default HTTPS install reads the public tag
@@ -47,7 +53,7 @@ opencode plugin add 'git+ssh://git@github.com/kotarCreative/opencode-whiteboard.
 > network/proxy access first:
 >
 > ```sh
-> git ls-remote https://github.com/kotarCreative/opencode-whiteboard.git v0.2.1
+> git ls-remote https://github.com/kotarCreative/opencode-whiteboard.git v0.2.2
 > ```
 >
 > Do not put a token in the plugin spec. No GitHub authentication is needed for
@@ -95,10 +101,13 @@ apply there. The MCP server and skill still work: use `/mcps` or
 `opencode mcp list` to confirm the connection, and open
 <http://127.0.0.1:4317> in a browser when you want the canvas UI.
 
-The desktop panel is experimental. The real Electron window runtime is not
-available in the build environment; see the caveats below. If a particular
-Desktop build does not load the GUI, use **Whiteboard: Open board** (browser
-pane) or open <http://127.0.0.1:4317> directly. The canvas and MCP still work.
+The desktop panel is experimental. The build environment does not include
+Desktop, so the automated suite cannot drive the Electron window; the v0.2.2
+panel fix was checked manually in OpenCode Desktop **2.4.1** at a wide and a
+narrow width, where the canvas toolbar rendered. See the caveats below. If a
+particular Desktop build does not load the GUI, use **Whiteboard: Open board**
+(browser pane) or open <http://127.0.0.1:4317> directly. The canvas and MCP
+still work.
 
 ## Board data
 
@@ -143,8 +152,8 @@ branches and ranges, but skips exact tags, so upgrade a pinned install by
 removing the old reference and adding the new one:
 
 ```sh
-opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.0'
-opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+opencode plugin add 'github:kotarCreative/opencode-whiteboard#v0.2.2'
 ```
 
 Remove the old reference first. `opencode plugin add` compares the full
@@ -161,7 +170,7 @@ outside the package cache and is preserved across remove/add and updates; see
 Remove with the same configured reference:
 
 ```sh
-opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.1'
+opencode plugin remove 'github:kotarCreative/opencode-whiteboard#v0.2.2'
 ```
 
 Board data under the user data root is not removed automatically. Delete that
@@ -194,13 +203,16 @@ prerelease process.
 
 ## Caveats
 
-- The real Electron Desktop window path was not available in the build
-  environment. The bundle is tested under the host’s actual CommonJS loader
-  bindings, with a placeholder Electron, real IPC code, and a real canvas
-  process; a clean Git install is tested against a real isolated OpenCode
-  server. v0.2.1 fixes the Desktop-only `__dirname is not defined` startup
-  crash: OpenCode supplies `require`, `module`, and `exports` but no Node path
-  globals or `import.meta.url`.
+- The automated build environment has no Desktop, so the bundle is tested under
+  the host’s actual CommonJS loader bindings, with a placeholder Electron, real
+  IPC code, and a real canvas process; a clean Git install is tested against a
+  real isolated OpenCode server. The panel layout and toolbar were also checked
+  manually in OpenCode Desktop **2.4.1** at wide and narrow widths. That manual
+  check does not cover other Desktop builds or full canvas interaction. v0.2.2
+  fixes the blank panel caused by a 0px embed view. v0.2.1 fixes the
+  Desktop-only `__dirname is not defined` startup crash: OpenCode supplies
+  `require`, `module`, and `exports` but no Node path globals or
+  `import.meta.url`.
 - The Desktop GUI plugin API is experimental and may change. The TUI has no
   side panel; use the MCP path and the loopback URL there.
 - The canvas binds `127.0.0.1` only. Do not expose the port or add a tunnel.

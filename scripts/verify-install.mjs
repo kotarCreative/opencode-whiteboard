@@ -140,10 +140,10 @@ async function main() {
     ["-c", "user.email=verify@example.invalid", "-c", "user.name=Whiteboard Verify", "commit", "-qm", "install snapshot"],
     snapshot,
   )
-  git(["tag", "v0.2.1"], snapshot)
+  git(["tag", "v0.2.2"], snapshot)
   git(["clone", "--bare", snapshot, remote], base)
-  const commit = run("git", ["-C", remote, "rev-parse", "v0.2.1"], { cwd: base }).stdout.trim()
-  ok("clean Git remote", `${remote}#v0.2.1 @ ${commit.slice(0, 12)}`)
+  const commit = run("git", ["-C", remote, "rev-parse", "v0.2.2"], { cwd: base }).stdout.trim()
+  ok("clean Git remote", `${remote}#v0.2.2 @ ${commit.slice(0, 12)}`)
 
   await mkdir(workspace, { recursive: true })
   await writeFile(join(workspace, "README.md"), "# isolated OpenCode workspace\n")
@@ -164,7 +164,7 @@ async function main() {
   )
 
   // --- Real one-reference install ------------------------------------------
-  const spec = `git+file://${remote}#v0.2.1`
+  const spec = `git+file://${remote}#v0.2.2`
   const added = run("opencode", ["plugin", "add", spec], { timeout: 240_000 })
   if (!/installed and added/.test(added.stdout + added.stderr)) {
     fail("opencode plugin add", (added.stdout + added.stderr).slice(-800))
@@ -275,7 +275,7 @@ export default Plugin.define({
     )
     installedPackage = cachePackage
     const packageJson = JSON.parse(await readFile(join(cachePackage, "package.json"), "utf8"))
-    if (packageJson.version !== "0.2.1") fail("installed package version", packageJson.version)
+    if (packageJson.version !== "0.2.2") fail("installed package version", packageJson.version)
     if (packageJson.exports?.["."] !== "./src/index.ts") {
       fail("installed package server export", JSON.stringify(packageJson.exports))
     }
